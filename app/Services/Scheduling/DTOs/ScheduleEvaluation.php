@@ -36,7 +36,7 @@ class ScheduleEvaluation
      */
     public function hasCandidate(): bool
     {
-        return ! empty($this->validCandidates);
+        return $this->bestCandidate !== null && ! empty($this->validCandidates);
     }
 
     /**
@@ -52,7 +52,7 @@ class ScheduleEvaluation
      */
     public function isResolved(): bool
     {
-        return $this->hasCandidate() && $this->hasValidRoom();
+        return $this->status === 'resolved' && $this->hasCandidate() && $this->hasValidRoom();
     }
 
     /**
