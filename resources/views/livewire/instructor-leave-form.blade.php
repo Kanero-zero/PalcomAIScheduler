@@ -14,132 +14,65 @@
         </div>
     @endif
 
-    {{-- Formulir Pengajuan Izin Instruktur --}}
-    <div class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-xs dark:border-zinc-800 dark:bg-zinc-900">
-        <div class="mb-5 flex flex-col gap-1 border-b border-zinc-100 pb-4 dark:border-zinc-800">
-            <h2 class="text-lg font-bold text-zinc-900 dark:text-white">
-                {{ __('Form Pengajuan Izin & Penjadwalan Otomatis') }}
-            </h2>
-            <p class="text-xs text-zinc-500 dark:text-zinc-400">
-                {{ __('Input data izin instruktur untuk mendeteksi kelas terdampak dan menghasilkan rekomendasi pengganti secara deterministik.') }}
-            </p>
+    {{-- Form izin terhubung ke App\Livewire\InstructorLeaveForm (backend Kanero) --}}
+    <form id="instructor-leave-form" wire:submit="submitLeave" aria-labelledby="leave-form-heading" class="[--color-accent:#1565D8] [--color-accent-foreground:#ffffff]">
+        <div class="space-y-6 p-5 sm:p-6">
+            <flux:field>
+                <flux:label for="leave-instructor">{{ __('Instruktur') }} <span aria-hidden="true" class="ms-1 text-red-600 dark:text-red-400">*</span></flux:label>
+                <flux:select id="leave-instructor" name="instructor_id" wire:model="form.instructor_id" required aria-describedby="leave-instructor-help leave-instructor-error" :invalid="$errors->has('form.instructor_id')">
+                    <option value="">{{ __('Pilih instruktur aktif') }}</option>
+                    @foreach ($instructors as $inst)
+                        <option value="{{ $inst->id }}" wire:key="leave-instructor-{{ $inst->id }}">{{ $inst->name }}</option>
+                    @endforeach
+                </flux:select>
+                <flux:description id="leave-instructor-help">{{ __('Pilih instruktur yang akan mengajukan izin.') }}</flux:description>
+                <flux:error id="leave-instructor-error" name="form.instructor_id" />
+            </flux:field>
+
+            <flux:field>
+                <flux:label for="leave-date">{{ __('Tanggal izin') }} <span aria-hidden="true" class="ms-1 text-red-600 dark:text-red-400">*</span></flux:label>
+                <flux:input id="leave-date" name="date" type="date" wire:model="form.date" required class="min-w-0 w-full" aria-describedby="leave-date-help leave-date-error" :invalid="$errors->has('form.date')" />
+                <flux:description id="leave-date-help">{{ __('Pilih tanggal izin. Tampilan tanggal mengikuti pengaturan perangkat.') }}</flux:description>
+                <flux:error id="leave-date-error" name="form.date" />
+            </flux:field>
+
+            <fieldset class="min-w-0 space-y-4">
+                <legend class="text-sm font-semibold text-zinc-900 dark:text-white">{{ __('Rentang waktu izin') }}</legend>
+                <div class="grid min-w-0 grid-cols-1 gap-5 sm:grid-cols-2">
+                    <flux:field class="min-w-0">
+                        <flux:label for="leave-start-time">{{ __('Jam mulai') }} <span aria-hidden="true" class="ms-1 text-red-600 dark:text-red-400">*</span></flux:label>
+                        <flux:input id="leave-start-time" name="start_time" type="time" step="60" wire:model="form.start_time" required class="min-w-0 w-full" aria-describedby="leave-start-help leave-start-error" :invalid="$errors->has('form.start_time')" />
+                        <flux:description id="leave-start-help">{{ __('Format 24 jam (HH:mm).') }}</flux:description>
+                        <flux:error id="leave-start-error" name="form.start_time" />
+                    </flux:field>
+                    <flux:field class="min-w-0">
+                        <flux:label for="leave-end-time">{{ __('Jam selesai') }} <span aria-hidden="true" class="ms-1 text-red-600 dark:text-red-400">*</span></flux:label>
+                        <flux:input id="leave-end-time" name="end_time" type="time" step="60" wire:model="form.end_time" required class="min-w-0 w-full" aria-describedby="leave-end-help leave-end-error" :invalid="$errors->has('form.end_time')" />
+                        <flux:description id="leave-end-help">{{ __('Harus setelah jam mulai, pada tanggal yang sama.') }}</flux:description>
+                        <flux:error id="leave-end-error" name="form.end_time" />
+                    </flux:field>
+                </div>
+            </fieldset>
+
+            <flux:field>
+                <flux:label for="leave-reason" badge="Opsional">{{ __('Alasan izin') }}</flux:label>
+                <flux:textarea id="leave-reason" name="reason" wire:model="form.reason" rows="4" maxlength="500" resize="vertical" placeholder="Tuliskan alasan atau keterangan singkat." aria-describedby="leave-reason-help leave-reason-error" :invalid="$errors->has('form.reason')" />
+                <flux:description id="leave-reason-help">{{ __('Maksimal 500 karakter.') }}</flux:description>
+                <flux:error id="leave-reason-error" name="form.reason" />
+            </flux:field>
         </div>
 
-        <form wire:submit="submitLeave" class="space-y-4">
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {{-- Dropdown Pilihan Instruktur --}}
-                <div class="sm:col-span-2">
-                    <label for="instructor_id" class="mb-1 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                        {{ __('Instruktur') }} <span class="text-rose-500">*</span>
-                    </label>
-                    <select
-                        id="instructor_id"
-                        wire:model="form.instructor_id"
-                        class="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-sm font-medium text-zinc-800 shadow-xs focus:border-[#1565D8] focus:outline-none focus:ring-2 focus:ring-[#1565D8]/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                    >
-                        <option value="">{{ __('-- Pilih Instruktur yang Mengajukan Izin --') }}</option>
-                        @foreach ($instructors as $inst)
-                            <option value="{{ $inst->id }}" wire:key="inst-opt-{{ $inst->id }}">
-                                {{ $inst->name }}
-                            </option>
-                        @endforeach
-                    </select>
-                    @error('form.instructor_id')
-                        <p class="mt-1 text-xs font-medium text-rose-600 dark:text-rose-400">{{ $message }}</p>
-                    @enderror
-                </div>
-
-                {{-- Tanggal Izin --}}
-                <div class="sm:col-span-2">
-                    <label for="leave_date" class="mb-1 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                        {{ __('Tanggal Izin') }} <span class="text-rose-500">*</span>
-                    </label>
-                    <input
-                        id="leave_date"
-                        type="date"
-                        wire:model="form.date"
-                        class="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2 text-sm text-zinc-800 shadow-xs focus:border-[#1565D8] focus:outline-none focus:ring-2 focus:ring-[#1565D8]/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                    />
-                    @error('form.date')
-                        <p class="mt-1 text-xs font-medium text-rose-600 dark:text-rose-400">{{ $message }}</p>
-                    @enderror
-                </div>
-
-                {{-- Jam Mulai --}}
-                <div>
-                    <label for="start_time" class="mb-1 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                        {{ __('Jam Mulai') }} <span class="text-rose-500">*</span>
-                    </label>
-                    <input
-                        id="start_time"
-                        type="time"
-                        wire:model="form.start_time"
-                        placeholder="13:00"
-                        class="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2 text-sm text-zinc-800 shadow-xs focus:border-[#1565D8] focus:outline-none focus:ring-2 focus:ring-[#1565D8]/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                    />
-                    @error('form.start_time')
-                        <p class="mt-1 text-xs font-medium text-rose-600 dark:text-rose-400">{{ $message }}</p>
-                    @enderror
-                </div>
-
-                {{-- Jam Selesai --}}
-                <div>
-                    <label for="end_time" class="mb-1 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                        {{ __('Jam Selesai') }} <span class="text-rose-500">*</span>
-                    </label>
-                    <input
-                        id="end_time"
-                        type="time"
-                        wire:model="form.end_time"
-                        placeholder="18:00"
-                        class="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2 text-sm text-zinc-800 shadow-xs focus:border-[#1565D8] focus:outline-none focus:ring-2 focus:ring-[#1565D8]/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                    />
-                    @error('form.end_time')
-                        <p class="mt-1 text-xs font-medium text-rose-600 dark:text-rose-400">{{ $message }}</p>
-                    @enderror
-                </div>
-
-                {{-- Alasan Izin (Opsional) --}}
-                <div class="sm:col-span-2">
-                    <label for="reason" class="mb-1 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                        {{ __('Alasan Izin (Opsional)') }}
-                    </label>
-                    <textarea
-                        id="reason"
-                        wire:model="form.reason"
-                        rows="2"
-                        placeholder="Contoh: Izin urusan keluarga mendadak"
-                        class="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2 text-sm text-zinc-800 shadow-xs focus:border-[#1565D8] focus:outline-none focus:ring-2 focus:ring-[#1565D8]/20 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
-                    ></textarea>
-                    @error('form.reason')
-                        <p class="mt-1 text-xs font-medium text-rose-600 dark:text-rose-400">{{ $message }}</p>
-                    @enderror
-                </div>
-            </div>
-
-            {{-- Tombol Aksi --}}
-            <div class="flex items-center justify-between border-t border-zinc-100 pt-4 dark:border-zinc-800">
-                <button
-                    type="button"
-                    wire:click="resetForm"
-                    class="rounded-xl border border-zinc-300 px-4 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                    {{ __('Reset Form') }}
-                </button>
-
-                <flux:button
-                    type="submit"
-                    variant="primary"
-                    icon="bolt"
-                    class="bg-[#1565D8] hover:bg-[#0A3D91] text-white font-semibold"
-                >
+        <div class="flex flex-col gap-4 border-t border-zinc-100 bg-zinc-50/70 p-5 sm:p-6 dark:border-zinc-800 dark:bg-zinc-950/30">
+            <p class="text-xs leading-5 text-zinc-600 dark:text-zinc-400">{{ __('Pengajuan akan disimpan berstatus pending. Rekomendasi hanya berupa usulan dan tidak mengubah jadwal secara otomatis.') }}</p>
+            <div class="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
+                <flux:button type="button" variant="ghost" wire:click="resetForm" wire:loading.attr="disabled" wire:target="submitLeave">{{ __('Kosongkan formulir') }}</flux:button>
+                <flux:button type="submit" variant="primary" icon="bolt" wire:loading.attr="disabled" wire:target="submitLeave" class="w-full sm:w-auto">
                     <span wire:loading.remove wire:target="submitLeave">{{ __('Simpan & Evaluasi Jadwal') }}</span>
                     <span wire:loading wire:target="submitLeave">{{ __('Memproses...') }}</span>
                 </flux:button>
             </div>
-        </form>
-    </div>
-
+        </div>
+    </form>
     {{-- Hasil Evaluasi Penjadwalan (Jika Sudah Disubmit) --}}
     @if ($schedulingResult)
         <div class="rounded-2xl border border-zinc-200 bg-white p-6 shadow-xs dark:border-zinc-800 dark:bg-zinc-900">
