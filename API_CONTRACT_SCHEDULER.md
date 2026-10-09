@@ -279,23 +279,40 @@ Ketika ruangan awal bentrok dengan jadwal lain, kapasitas tidak mencukupi, atau 
   * `status`: `"resolved"`
   * `is_resolved`: `true`
   * `room.requires_room_change`: `true`
+  * `room.has_usable_room`: `true`
   * `room.suggested_alternative_room`: Objek ruangan alternatif yang disarankan
   * `summary`: Menyebutkan saran pengalihan ke ruangan alternatif.
 * **Jika TIDAK ADA ruangan alternatif yang memenuhi syarat:**
   * `status`: `"room_issue"`
   * `is_resolved`: `false`
+  * `room.has_usable_room`: `false`
+  * `room.suggested_alternative_room`: `null`
   * `summary`: Menyebutkan bahwa instruktur ada namun ruangan bermasalah dan tidak ada alternatif.
+* **Pencegahan Bentrok Ruangan Alternatif Lintas Kelas (Edge Case):**
+  * Jika dua kelas terdampak yang jadwalnya bertabrakan sama-sama membutuhkan ruangan alternatif, engine memastikan **keduanya tidak direkomendasikan ruangan alternatif yang sama**.
+  * Ruangan alternatif yang sudah dialokasikan ke kelas pertama akan di-lock. Kelas kedua dialokasikan ke ruangan alternatif berikutnya yang masih tersedia.
+  * Jika tidak ada ruangan alternatif lain, kelas kedua ditandai `status: "room_issue"`, `is_resolved: false`, `has_valid_room: false`.
 
-### E. Kondisi Khusus: Pencegahan Double-Booking Kelas Beririsan
+### E. Kondisi Khusus: Pencegahan Double-Booking Instruktur Lintas Kelas
 Ketika seorang instruktur yang izin memiliki **dua kelas atau lebih yang jamnya bertabrakan/beririsan**:
 * Kandidat instruktur pengganti **tidak boleh dialokasikan ke dua kelas yang berlangsung pada waktu yang sama**.
-* Kelas kedua otomatis dialokasikan ke kandidat peringkat berikutnya, dan pesan peringatan dimasukkan ke array `warnings`:
-  ```json
-  "warnings": [
-    "Kandidat Kanero berpotensi bentrok jika ditugaskan ke dua kelas terdampak sekaligus (bersamaan dengan 'Kelas Microsoft Excel - Reguler Siang')."
-  ]
-  ```
-* Jika tidak ada kandidat pengganti lain untuk kelas kedua, kelas kedua ditandai `no_candidate` / `unresolved`.
+* **Jika tersedia kandidat pengganti lain:**
+  * Kelas kedua otomatis dialokasikan ke kandidat peringkat berikutnya, dan pesan peringatan dimasukkan ke array `warnings`:
+    ```json
+    "warnings": [
+      "Kandidat Kanero berpotensi bentrok jika ditugaskan ke dua kelas terdampak sekaligus (bersamaan dengan 'Kelas Microsoft Excel - Reguler Siang')."
+    ]
+    ```
+* **Jika hanya tersedia satu kandidat pengganti (Edge Case):**
+  * Kelas pertama mendapatkan kandidat tersebut (`status: "resolved"`, `is_resolved: true`, `has_candidate: true`).
+  * Pada kelas kedua, kandidat tersebut dipindahkan ke `disqualified_candidates` dengan keterangan bentrok lintas kelas.
+  * Kelas kedua secara konsisten memiliki:
+    * `status`: `"no_candidate"`
+    * `best_candidate`: `null`
+    * `valid_candidates`: `[]` (kosong)
+    * `has_candidate`: `false`
+    * `is_resolved`: `false`
+  * Nilai `total_resolved_schedules` pada hasil akhir secara konsisten hanya menghitung kelas yang berhasil (`1`), dan `all_schedules_resolved`: `false`.
 
 ---
 
@@ -348,3 +365,36 @@ Eksekusi verifikasi via Artisan Command:
 ```bash
 php artisan schedule:evaluate
 ```
+
+---
+
+## 8. Panduan Integrasi Frontend (Untuk Anggota 1)
+
+Komponen backend formulir pengajuan izin telah siap di `App\Livewire\InstructorLeaveForm` dengan view template mandiri di `resources/views/livewire/instructor-leave-form.blade.php`.
+
+### Cara Pemasangan di View Halaman (`resources/views/pages/instructor-leaves.blade.php`):
+Cukup sematkan tag Livewire berikut di dalam kontainer halaman:
+```html
+<livewire:instructor-leave-form />
+```
+
+### Properti & State yang Tersedia di Komponen:
+1. **`$form` (`array`):**
+   * `form.instructor_id`: ID instruktur (integer)
+   * `form.date`: Tanggal izin (`YYYY-MM-DD`)
+   * `form.start_time`: Jam mulai (`HH:mm`, contoh: `13:00`)
+   * `form.end_time`: Jam selesai (`HH:mm`, contoh: `18:00`)
+   * `form.reason`: Alasan izin (opsional, max 500 karakter)
+2. **`$this->instructors` (`Collection`):**
+   * Koleksi model `Instructor` aktif yang terurut alfabetis berdasarkan nama (`id`, `name`), siap digunakan untuk mengisi dropdown atau `<flux:select>`.
+3. **`$schedulingResult` (`array|null`):**
+   * Berisi hasil evaluasi penjadwalan lengkap sesuai kontrak data bagian 4 setelah `submitLeave()` berhasil dieksekusi.
+4. **`$submittedLeaveId` (`int|null`):**
+   * ID record izin baru yang tersimpan di tabel `instructor_leaves` dengan status awal `'pending'`.
+5. **`$feedbackMessage` (`string|null`):**
+   * Pesan informatif untuk notifikasi status pengajuan izin dan deteksi jadwal.
+
+### Action yang Tersedia:
+* **`wire:submit="submitLeave"`** &rarr; Memvalidasi form, mencegah duplikasi, menyimpan izin dengan status `pending`, dan menjalankan `SchedulingEngine`.
+* **`wire:click="resetForm"`** &rarr; Mengosongkan form input dan menghapus hasil evaluasi.
+

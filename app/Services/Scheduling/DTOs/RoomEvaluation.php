@@ -30,7 +30,11 @@ class RoomEvaluation
      */
     public function hasUsableRoom(): bool
     {
-        return $this->isValid || $this->suggestedAlternativeRoom !== null;
+        if ($this->requiresRoomChange) {
+            return $this->suggestedAlternativeRoom !== null && $this->suggestedAlternativeRoom->isValid;
+        }
+
+        return $this->isValid;
     }
 
     /**

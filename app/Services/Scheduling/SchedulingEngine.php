@@ -375,20 +375,43 @@ class SchedulingEngine
      */
     public function findAlternativeRooms(Schedule $schedule, int $studentCount, string $scheduleDate): array
     {
+        return $this->findAlternativeRoomsForTime(
+            excludeRoomId: $schedule->room_id,
+            studentCount: $studentCount,
+            scheduleDate: $scheduleDate,
+            startTime: $schedule->start_time,
+            endTime: $schedule->end_time,
+            excludeScheduleId: $schedule->id,
+        );
+    }
+
+    /**
+     * Search for alternative available rooms with sufficient capacity for a specific time window.
+     *
+     * @return list<RoomEvaluation>
+     */
+    public function findAlternativeRoomsForTime(
+        int $excludeRoomId,
+        int $studentCount,
+        string $scheduleDate,
+        string $startTime,
+        string $endTime,
+        ?int $excludeScheduleId = null,
+    ): array {
         $candidateRooms = Room::query()
-            ->where('id', '!=', $schedule->room_id)
+            ->where('id', '!=', $excludeRoomId)
             ->where('status', 'available')
             ->where('capacity', '>=', $studentCount)
             ->get();
 
         $alternativeRooms = [];
-        $startTime = $this->normalizeTime($schedule->start_time);
-        $endTime = $this->normalizeTime($schedule->end_time);
+        $startTime = $this->normalizeTime($startTime);
+        $endTime = $this->normalizeTime($endTime);
 
         foreach ($candidateRooms as $altRoom) {
             $hasConflict = Schedule::query()
                 ->where('room_id', $altRoom->id)
-                ->where('id', '!=', $schedule->id)
+                ->when($excludeScheduleId, fn ($query) => $query->where('id', '!=', $excludeScheduleId))
                 ->whereDate('date', $scheduleDate)
                 ->where('status', '!=', 'cancelled')
                 ->where('start_time', '<', $endTime)
@@ -425,12 +448,25 @@ class SchedulingEngine
     }
 
     /**
+     * Resolve cross-schedule conflicts for both candidates and rooms.
+     *
+     * @param  list<ScheduleEvaluation>  $evaluations
+     * @return list<ScheduleEvaluation>
+     */
+    public function resolveCrossScheduleConflicts(array $evaluations): array
+    {
+        $evaluations = $this->resolveCrossScheduleCandidateConflicts($evaluations);
+
+        return $this->resolveCrossScheduleRoomConflicts($evaluations);
+    }
+
+    /**
      * Detect and resolve potential double-booking when the same candidate is assigned to multiple overlapping affected classes.
      *
      * @param  list<ScheduleEvaluation>  $evaluations
      * @return list<ScheduleEvaluation>
      */
-    protected function resolveCrossScheduleConflicts(array $evaluations): array
+    public function resolveCrossScheduleCandidateConflicts(array $evaluations): array
     {
         /** @var list<array{instructor_id: int, start_time: string, end_time: string, class_name: string}> $allocatedAssignments */
         $allocatedAssignments = [];
@@ -440,68 +476,182 @@ class SchedulingEngine
                 continue;
             }
 
-            $candidate = $eval->bestCandidate;
-            $overlapsWithExisting = false;
-            $conflictingClassName = null;
+            // Check all candidates in validCandidates against current allocatedAssignments
+            $stillValidCandidates = [];
+            foreach ($eval->validCandidates as $cand) {
+                $hasAllocationConflict = false;
+                $conflictingClass = null;
 
-            foreach ($allocatedAssignments as $assignment) {
-                if ($assignment['instructor_id'] === $candidate->instructorId) {
-                    if ($this->intervalsOverlap($assignment['start_time'], $assignment['end_time'], $eval->startTime, $eval->endTime)) {
-                        $overlapsWithExisting = true;
-                        $conflictingClassName = $assignment['class_name'];
+                foreach ($allocatedAssignments as $assignment) {
+                    if ($assignment['instructor_id'] === $cand->instructorId && $this->intervalsOverlap($assignment['start_time'], $assignment['end_time'], $eval->startTime, $eval->endTime)) {
+                        $hasAllocationConflict = true;
+                        $conflictingClass = $assignment['class_name'];
                         break;
                     }
+                }
+
+                if ($hasAllocationConflict) {
+                    $warningMessage = "Kandidat {$cand->instructorName} berpotensi bentrok jika ditugaskan ke dua kelas terdampak sekaligus (bersamaan dengan '{$conflictingClass}').";
+                    if (! in_array($warningMessage, $eval->warnings, true)) {
+                        $eval->warnings[] = $warningMessage;
+                    }
+
+                    $eval->disqualifiedCandidates[] = new CandidateEvaluation(
+                        instructorId: $cand->instructorId,
+                        instructorName: $cand->instructorName,
+                        isValid: false,
+                        competencyMatched: true,
+                        skillName: $cand->skillName,
+                        skillLevel: $cand->skillLevel,
+                        hasScheduleConflict: true,
+                        hasLeaveConflict: false,
+                        score: 0,
+                        reasons: ["Bentrok dengan kelas '{$conflictingClass}' yang jadwalnya bersamaan."],
+                        disqualificationReason: "Bentrok dengan kelas '{$conflictingClass}' yang jadwalnya bersamaan.",
+                        otherClassesCountToday: $cand->otherClassesCountToday,
+                    );
+                } else {
+                    $stillValidCandidates[] = $cand;
                 }
             }
 
-            if ($overlapsWithExisting) {
-                // Find next valid candidate who doesn't conflict with current allocations
-                $nextCandidate = null;
-                foreach ($eval->validCandidates as $altCand) {
-                    if ($altCand->instructorId === $candidate->instructorId) {
+            $eval->validCandidates = $stillValidCandidates;
+
+            if (empty($stillValidCandidates)) {
+                $eval->bestCandidate = null;
+                $eval->status = 'no_candidate';
+                $eval->summary = 'Tidak ada kandidat pengganti yang dapat ditugaskan karena kandidat yang ada sudah dialokasikan ke kelas lain yang jadwalnya bersamaan.';
+            } else {
+                $prevBestId = $eval->bestCandidate->instructorId;
+                $eval->bestCandidate = $stillValidCandidates[0];
+
+                if ($eval->bestCandidate->instructorId !== $prevBestId) {
+                    $eval->summary .= " (Perhatian: Dialihkan ke {$eval->bestCandidate->instructorName} karena kandidat sebelumnya sudah ditugaskan pada kelas lain yang bersamaan).";
+                }
+
+                $allocatedAssignments[] = [
+                    'instructor_id' => $eval->bestCandidate->instructorId,
+                    'start_time' => $eval->startTime,
+                    'end_time' => $eval->endTime,
+                    'class_name' => $eval->className,
+                ];
+            }
+        }
+
+        return $evaluations;
+    }
+
+    /**
+     * Detect and resolve potential room double-booking when multiple affected classes overlap.
+     *
+     * @param  list<ScheduleEvaluation>  $evaluations
+     * @return list<ScheduleEvaluation>
+     */
+    public function resolveCrossScheduleRoomConflicts(array $evaluations): array
+    {
+        /** @var list<array{room_id: int, room_name: string, start_time: string, end_time: string, class_name: string}> $allocatedRooms */
+        $allocatedRooms = [];
+
+        foreach ($evaluations as $eval) {
+            if ($eval->roomEvaluation === null) {
+                continue;
+            }
+
+            $roomEval = $eval->roomEvaluation;
+
+            // Determine which room this schedule currently intends to use
+            $isAlternative = $roomEval->requiresRoomChange && $roomEval->suggestedAlternativeRoom !== null;
+            $intendedRoom = $isAlternative ? $roomEval->suggestedAlternativeRoom : $roomEval;
+
+            $overlapsWithAllocated = false;
+            $conflictingClass = null;
+
+            foreach ($allocatedRooms as $alloc) {
+                if ($alloc['room_id'] === $intendedRoom->roomId && $this->intervalsOverlap($alloc['start_time'], $alloc['end_time'], $eval->startTime, $eval->endTime)) {
+                    $overlapsWithAllocated = true;
+                    $conflictingClass = $alloc['class_name'];
+                    break;
+                }
+            }
+
+            if ($overlapsWithAllocated) {
+                // If alternativeRooms is empty, attempt to populate candidate alternative rooms
+                if (empty($roomEval->alternativeRooms)) {
+                    $roomEval->alternativeRooms = $this->findAlternativeRoomsForTime(
+                        excludeRoomId: $intendedRoom->roomId,
+                        studentCount: $roomEval->studentCount,
+                        scheduleDate: $eval->date,
+                        startTime: $eval->startTime,
+                        endTime: $eval->endTime,
+                        excludeScheduleId: $eval->scheduleId,
+                    );
+                }
+
+                // Find next available alternative room that doesn't conflict with allocated rooms
+                $nextRoom = null;
+                foreach ($roomEval->alternativeRooms as $altRoom) {
+                    if ($altRoom->roomId === $intendedRoom->roomId) {
                         continue;
                     }
 
-                    $altHasOverlap = false;
-                    foreach ($allocatedAssignments as $assignment) {
-                        if ($assignment['instructor_id'] === $altCand->instructorId) {
-                            if ($this->intervalsOverlap($assignment['start_time'], $assignment['end_time'], $eval->startTime, $eval->endTime)) {
-                                $altHasOverlap = true;
-                                break;
-                            }
+                    $altOverlaps = false;
+                    foreach ($allocatedRooms as $alloc) {
+                        if ($alloc['room_id'] === $altRoom->roomId && $this->intervalsOverlap($alloc['start_time'], $alloc['end_time'], $eval->startTime, $eval->endTime)) {
+                            $altOverlaps = true;
+                            break;
                         }
                     }
 
-                    if (! $altHasOverlap) {
-                        $nextCandidate = $altCand;
+                    if (! $altOverlaps) {
+                        $nextRoom = $altRoom;
                         break;
                     }
                 }
 
-                $warningMessage = "Kandidat {$candidate->instructorName} berpotensi bentrok jika ditugaskan ke dua kelas terdampak sekaligus (bersamaan dengan '{$conflictingClassName}').";
-                $eval->warnings[] = $warningMessage;
+                $warningMessage = "Ruangan {$intendedRoom->roomName} berpotensi bentrok jika digunakan untuk dua kelas terdampak sekaligus (bersamaan dengan '{$conflictingClass}').";
+                if (! in_array($warningMessage, $eval->warnings, true)) {
+                    $eval->warnings[] = $warningMessage;
+                }
 
-                if ($nextCandidate) {
-                    $eval->bestCandidate = $nextCandidate;
-                    $eval->summary .= " (Perhatian: Dialihkan ke {$nextCandidate->instructorName} karena {$candidate->instructorName} sudah ditugaskan pada kelas '{$conflictingClassName}' yang bersamaan).";
-                    $allocatedAssignments[] = [
-                        'instructor_id' => $nextCandidate->instructorId,
+                if ($nextRoom) {
+                    $roomEval->suggestedAlternativeRoom = $nextRoom;
+                    $roomEval->requiresRoomChange = true;
+                    $roomEval->notes .= " (Perhatian: Dialihkan ke {$nextRoom->roomName} karena {$intendedRoom->roomName} sudah dialokasikan ke kelas '{$conflictingClass}' pada jam yang sama).";
+                    $eval->summary .= " (Ruangan dialihkan ke {$nextRoom->roomName} karena {$intendedRoom->roomName} bersamaan dengan '{$conflictingClass}').";
+
+                    $allocatedRooms[] = [
+                        'room_id' => $nextRoom->roomId,
+                        'room_name' => $nextRoom->roomName,
                         'start_time' => $eval->startTime,
                         'end_time' => $eval->endTime,
                         'class_name' => $eval->className,
                     ];
                 } else {
-                    $eval->bestCandidate = null;
-                    $eval->status = 'no_candidate';
-                    $eval->summary = "Kandidat ({$candidate->instructorName}) tidak dapat ditugaskan karena sudah dialokasikan ke kelas '{$conflictingClassName}' yang jadwalnya bersamaan, dan tidak ada kandidat pengganti lain.";
+                    // No other alternative room is available!
+                    $roomEval->suggestedAlternativeRoom = null;
+                    $roomEval->requiresRoomChange = true;
+                    $roomEval->isValid = false;
+                    $roomEval->hasRoomConflict = true;
+
+                    if ($eval->hasCandidate()) {
+                        $eval->status = 'room_issue';
+                    }
+                    $eval->summary = "Ruangan {$intendedRoom->roomName} tidak dapat digunakan karena sudah dialokasikan ke kelas '{$conflictingClass}' pada jam yang sama, dan tidak ada ruangan alternatif lain.";
                 }
             } else {
-                $allocatedAssignments[] = [
-                    'instructor_id' => $candidate->instructorId,
-                    'start_time' => $eval->startTime,
-                    'end_time' => $eval->endTime,
-                    'class_name' => $eval->className,
-                ];
+                // Record room allocation if room is usable
+                if ($roomEval->hasUsableRoom()) {
+                    $activeRoom = $isAlternative ? $roomEval->suggestedAlternativeRoom : $roomEval;
+                    if ($activeRoom) {
+                        $allocatedRooms[] = [
+                            'room_id' => $activeRoom->roomId,
+                            'room_name' => $activeRoom->roomName,
+                            'start_time' => $eval->startTime,
+                            'end_time' => $eval->endTime,
+                            'class_name' => $eval->className,
+                        ];
+                    }
+                }
             }
         }
 
