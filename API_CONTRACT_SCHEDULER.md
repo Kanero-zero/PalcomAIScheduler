@@ -272,6 +272,31 @@ Terjadi ketika instruktur mengajukan izin pada rentang jam di mana ia tidak memi
   }
   ```
 
+### D. Kondisi Khusus: Masalah Ruangan & Rekomendasi Ruangan Alternatif
+Ketika ruangan awal bentrok dengan jadwal lain, kapasitas tidak mencukupi, atau sedang dalam perawatan (*maintenance*):
+* Sistem otomatis mencari ruangan lain yang kosong dan kapasitasnya mencukupi (*best fit capacity*).
+* **Jika ruangan alternatif ditemukan:**
+  * `status`: `"resolved"`
+  * `is_resolved`: `true`
+  * `room.requires_room_change`: `true`
+  * `room.suggested_alternative_room`: Objek ruangan alternatif yang disarankan
+  * `summary`: Menyebutkan saran pengalihan ke ruangan alternatif.
+* **Jika TIDAK ADA ruangan alternatif yang memenuhi syarat:**
+  * `status`: `"room_issue"`
+  * `is_resolved`: `false`
+  * `summary`: Menyebutkan bahwa instruktur ada namun ruangan bermasalah dan tidak ada alternatif.
+
+### E. Kondisi Khusus: Pencegahan Double-Booking Kelas Beririsan
+Ketika seorang instruktur yang izin memiliki **dua kelas atau lebih yang jamnya bertabrakan/beririsan**:
+* Kandidat instruktur pengganti **tidak boleh dialokasikan ke dua kelas yang berlangsung pada waktu yang sama**.
+* Kelas kedua otomatis dialokasikan ke kandidat peringkat berikutnya, dan pesan peringatan dimasukkan ke array `warnings`:
+  ```json
+  "warnings": [
+    "Kandidat Kanero berpotensi bentrok jika ditugaskan ke dua kelas terdampak sekaligus (bersamaan dengan 'Kelas Microsoft Excel - Reguler Siang')."
+  ]
+  ```
+* Jika tidak ada kandidat pengganti lain untuk kelas kedua, kelas kedua ditandai `no_candidate` / `unresolved`.
+
 ---
 
 ## 6. Sumber Data Dropdown Instruktur
