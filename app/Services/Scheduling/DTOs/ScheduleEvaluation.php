@@ -29,6 +29,7 @@ class ScheduleEvaluation
         public ?CandidateEvaluation $bestCandidate,
         public string $summary,
         public array $warnings = [],
+        public ?array $aiRecommendation = null,
     ) {}
 
     /**
@@ -80,6 +81,7 @@ class ScheduleEvaluation
             'disqualified_candidates' => array_map(fn (CandidateEvaluation $c) => $c->toArray(), $this->disqualifiedCandidates),
             'summary' => $this->summary,
             'warnings' => $this->warnings,
+            'ai_recommendation' => $this->aiRecommendation,
         ];
     }
 }

@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\Instructor;
 use App\Models\InstructorLeave;
+use App\Services\Scheduling\GeminiSchedulingAdvisor;
 use App\Services\Scheduling\SchedulingEngine;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
@@ -179,6 +180,36 @@ class InstructorLeaveForm extends Component
         } else {
             $this->feedbackMessage = "Pengajuan izin berhasil dicatat (status: pending). Ditemukan {$evaluation->totalAffectedSchedules} kelas terdampak ({$evaluation->totalResolvedSchedules} terselesaikan). Beberapa kelas membutuhkan perhatian atau penyesuaian admin.";
         }
+
+        return $this->schedulingResult;
+    }
+
+    /**
+     * Action untuk meminta analisis mendalam dan penjelasan rekomendasi dari Google Gemini AI.
+     * Hanya dijalankan jika admin meminta secara eksplisit, bukan otomatis.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function analyzeWithAi(): ?array
+    {
+        if (! $this->schedulingResult || ! $this->submittedLeaveId) {
+            return null;
+        }
+
+        $leave = InstructorLeave::find($this->submittedLeaveId);
+        if (! $leave) {
+            return null;
+        }
+
+        $engine = app(SchedulingEngine::class);
+        $advisor = app(GeminiSchedulingAdvisor::class);
+
+        $deterministicResult = $engine->evaluateLeave($leave);
+        $enhancedResult = $advisor->enhanceEvaluation($deterministicResult);
+
+        $this->schedulingResult = $enhancedResult->toArray();
+
+        $this->feedbackMessage = 'Rekomendasi berhasil dianalisis dan diperkaya dengan Google Gemini 3.5 Flash-Lite.';
 
         return $this->schedulingResult;
     }
