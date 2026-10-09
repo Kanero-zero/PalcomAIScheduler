@@ -23,6 +23,7 @@ class SchedulingResult
         public int $totalResolvedSchedules,
         public bool $allSchedulesResolved,
         public string $summary,
+        public ?array $aiSummary = null,
     ) {}
 
     /**
@@ -52,6 +53,7 @@ class SchedulingResult
             'total_resolved_schedules' => $this->totalResolvedSchedules,
             'all_schedules_resolved' => $this->allSchedulesResolved,
             'summary' => $this->summary,
+            'ai_summary' => $this->aiSummary,
             'affected_schedules' => array_map(fn (ScheduleEvaluation $s) => $s->toArray(), $this->affectedSchedules),
         ];
     }

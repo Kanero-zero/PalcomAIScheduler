@@ -396,5 +396,58 @@ Cukup sematkan tag Livewire berikut di dalam kontainer halaman:
 
 ### Action yang Tersedia:
 * **`wire:submit="submitLeave"`** &rarr; Memvalidasi form, mencegah duplikasi, menyimpan izin dengan status `pending`, dan menjalankan `SchedulingEngine`.
+* **`wire:click="analyzeWithAi"`** &rarr; Meminta analisis lanjutan dan penjelasan mendalam menggunakan **Google Gemini 3.5 Flash-Lite** (hanya dijalankan saat admin meminta).
 * **`wire:click="resetForm"`** &rarr; Mengosongkan form input dan menghapus hasil evaluasi.
+
+---
+
+## 9. Integrasi AI: Google Gemini 3.5 Flash-Lite
+
+Untuk memperkaya rekomendasi deterministik dengan penjelasan manusiawi yang mendalam dan skor keyakinan, sistem mengintegrasikan **Google Gemini 3.5 Flash-Lite**:
+* **Provider:** Google Gemini API (`https://generativelanguage.googleapis.com/v1beta`)
+* **Model ID:** `gemini-3.5-flash-lite` (Stable GA)
+* **Kunci API:** Disimpan aman di `.env` (`GEMINI_API_KEY`), tidak di-commit ke Git.
+
+### Prinsip Utama Integrasi AI:
+1. **Penentu Kebenaran Mutlak:** `SchedulingEngine` deterministik lokal tetap menjadi satu-satunya otoritas penentu kelayakan instruktur (keahlian, bentrok jadwal, izin) dan ruangan.
+2. **Peran Gemini AI:** Hanya memeringkat dan menjelaskan kandidat yang **sudah dinyatakan valid** oleh Scheduling Engine. AI tidak pernah diberi akses untuk meloloskan kandidat yang didiskualifikasi.
+3. **Pencegahan Halusinasi:** Service `GeminiSchedulingAdvisor` memvalidasi respon AI secara ketat; instruktur yang tidak ada dalam daftar `validCandidates` otomatis dibuang.
+4. **Mekanisme Fallback Otomatis:** Jika API key habis kuota, jaringan terputus, atau API gagal, sistem otomatis beralih ke rekomendasi deterministik (`fallback_used: true`) tanpa error.
+5. **Eksekusi Eksplisit:** Panggilan AI **tidak dijalankan otomatis saat submit**, melainkan hanya saat admin secara sadar menekan tombol *"Minta Analisis Gemini AI"* atau menambahkan opsi `--ai` pada CLI Artisan.
+
+### Struktur Data Tambahan Hasil AI pada Kontrak JSON:
+Pada setiap jadwal terdampak (`affected_schedules.*`):
+```json
+"ai_recommendation": {
+  "is_ai_generated": true,
+  "model": "gemini-3.5-flash-lite",
+  "best_candidate_id": 2,
+  "summary_explanation": "Kanero sangat direkomendasikan karena memiliki kompetensi tingkat Advanced...",
+  "rankings": [
+    {
+      "instructor_id": 2,
+      "instructor_name": "Kanero",
+      "rank": 1,
+      "ai_reasoning": "Sangat menguasai materi Microsoft Excel dan memiliki beban mengajar ringan...",
+      "confidence_score": 96
+    }
+  ],
+  "fallback_used": false
+}
+```
+
+Pada root hasil evaluasi (`ai_summary`):
+```json
+"ai_summary": {
+  "is_ai_generated": true,
+  "model": "gemini-3.5-flash-lite",
+  "executive_summary": "Seluruh 2 kelas terdampak berhasil dicarikan rekomendasi instruktur pengganti yang kompeten dan bebas bentrok jadwal/ruangan...",
+  "generated_at": "2026-10-09T19:24:35+07:00"
+}
+```
+
+Eksekusi CLI dengan AI:
+```bash
+php artisan schedule:evaluate --ai
+```
 
