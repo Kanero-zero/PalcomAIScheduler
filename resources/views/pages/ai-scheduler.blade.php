@@ -12,9 +12,9 @@
             </div>
             <div>
                 {{-- Area tombol aksi (misal: Jalankan Analisis AI) --}}
-                <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-950/50 dark:text-emerald-400">
-                    <span class="size-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    Agentic AI Ready
+                <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-950/50 dark:text-amber-400">
+                    <span class="size-1.5 rounded-full bg-amber-500"></span>
+                    {{ __('Dalam Pengembangan') }}
                 </span>
             </div>
         </div>
@@ -26,10 +26,10 @@
                     <flux:icon name="sparkles" class="size-6" />
                 </div>
                 <h3 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">
-                    {{ __('Tampilan Rekomendasi AI Schedulling') }}
+                    {{ __('Rekomendasi AI Scheduler') }}
                 </h3>
                 <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                    {{ __('Halaman ini disiapkan untuk menampilkan alur rekomendasi AI (Dampak Izin → Filter Skill → Cek Ruangan → Skor Confidence & Tombol Approve).') }}
+                    {{ __('Rekomendasi instruktur pengganti dan penyesuaian jadwal akan ditampilkan di sini setelah fitur AI tersedia. Saat ini belum ada analisis AI yang dijalankan.') }}
                 </p>
             </div>
         </div>

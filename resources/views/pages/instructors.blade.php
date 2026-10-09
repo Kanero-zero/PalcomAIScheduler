@@ -22,7 +22,7 @@
                     {{ __('Manajemen Instruktur & Skill') }}
                 </h3>
                 <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                    {{ __('Partner tim dapat menambahkan tabel instruktur, badge keahlian (Excel, Word, Desain), dan status instruktur di sini.') }}
+                    {{ __('Daftar instruktur beserta kompetensi dan keahliannya akan ditampilkan pada halaman ini. Tampilan daftar instruktur belum tersedia.') }}
                 </p>
             </div>
         </div>

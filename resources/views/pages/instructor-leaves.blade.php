@@ -22,7 +22,7 @@
                     {{ __('Form & Riwayat Izin Instruktur') }}
                 </h3>
                 <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                    {{ __('Partner tim dapat menambahkan form input izin (seperti skenario: Wahyu izin Kamis 13.00-18.00) dan tabel riwayat izin di sini.') }}
+                    {{ __('Pengajuan dan riwayat izin instruktur akan ditampilkan pada halaman ini. Formulir pengajuan izin belum tersedia.') }}
                 </p>
             </div>
         </div>

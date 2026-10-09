@@ -22,7 +22,7 @@
                     {{ __('Daftar Lab & Kapasitas') }}
                 </h3>
                 <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                    {{ __('Partner tim dapat menambahkan kartu status lab (misal: Lab 1, Lab 2), kapasitas siswa, dan status ketersediaan di sini.') }}
+                    {{ __('Daftar ruangan dan lab beserta kapasitasnya akan ditampilkan pada halaman ini. Informasi ketersediaan ruangan belum tersedia.') }}
                 </p>
             </div>
         </div>

@@ -7,7 +7,7 @@
         <flux:sidebar sticky collapsible="mobile" class="border-e border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900">
             <flux:sidebar.header>
                 <x-app-logo :sidebar="true" href="{{ route('dashboard') }}" wire:navigate />
-                <flux:sidebar.collapse class="lg:hidden" />
+                <flux:sidebar.collapse class="lg:hidden" tooltip="Tutup navigasi" />
             </flux:sidebar.header>
 
             <flux:sidebar.nav>
@@ -47,12 +47,14 @@
                 </div>
             </flux:sidebar.nav>
 
-            <x-desktop-user-menu class="hidden lg:block" :name="auth()->user()->name" />
+            <x-desktop-user-menu class="hidden lg:block" />
         </flux:sidebar>
 
         <!-- Mobile User Menu -->
         <flux:header class="lg:hidden">
-            <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
+            <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" aria-label="Buka atau tutup navigasi" />
+
+            <x-app-logo href="{{ route('dashboard') }}" class="ms-2" wire:navigate />
 
             <flux:spacer />
 
@@ -62,7 +64,7 @@
                     icon-trailing="chevron-down"
                 />
 
-                <flux:menu>
+                <flux:menu class="max-w-[calc(100vw-2rem)]">
                     <flux:menu.radio.group>
                         <div class="p-0 text-sm font-normal">
                             <div class="flex items-center gap-2 px-1 py-1.5 text-start text-sm">
@@ -71,9 +73,9 @@
                                     :initials="auth()->user()->initials()"
                                 />
 
-                                <div class="grid flex-1 text-start text-sm leading-tight">
-                                    <flux:heading class="truncate">{{ auth()->user()->name }}</flux:heading>
-                                    <flux:text class="truncate">{{ auth()->user()->email }}</flux:text>
+                                <div class="grid min-w-0 flex-1 text-start text-sm leading-tight">
+                                    <flux:heading class="whitespace-normal wrap-anywhere">{{ auth()->user()->name }}</flux:heading>
+                                    <flux:text class="whitespace-normal wrap-anywhere">{{ auth()->user()->email }}</flux:text>
                                 </div>
                             </div>
                         </div>
