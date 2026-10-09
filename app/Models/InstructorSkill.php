@@ -26,7 +26,7 @@ class InstructorSkill extends Model
      *
      * @var string
      */
-    protected $table = 'instructors_skills';
+    protected $table = 'instructor_skills';
 
     /**
      * @var list<string>
