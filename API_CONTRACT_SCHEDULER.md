@@ -116,8 +116,11 @@ Struktur data array/JSON hasil evaluasi yang dikembalikan oleh `SchedulingEngine
       "start_time": "13:00:00",
       "end_time": "15:00:00",
       "status": "resolved",
+      "is_resolved": true,
       "has_candidate": true,
-      "summary": "Ditemukan 2 kandidat pengganti yang valid. Rekomendasi utama: Kanero (Skor: 110).",
+      "has_valid_room": true,
+      "summary": "Ditemukan 2 kandidat pengganti yang valid. Rekomendasi utama: Kanero (Skor: 110). Ruangan siap.",
+      "warnings": [],
       "room": {
         "room_id": 1,
         "room_name": "Lab 1",
@@ -127,7 +130,11 @@ Struktur data array/JSON hasil evaluasi yang dikembalikan oleh `SchedulingEngine
         "is_status_available": true,
         "has_room_conflict": false,
         "is_valid": true,
-        "notes": "Ruangan Lab 1 siap digunakan (Kapasitas: 20, Siswa: 10)."
+        "notes": "Ruangan Lab 1 siap digunakan (Kapasitas: 20, Siswa: 10).",
+        "requires_room_change": false,
+        "has_usable_room": true,
+        "suggested_alternative_room": null,
+        "alternative_rooms": []
       },
       "best_candidate": {
         "instructor_id": 2,

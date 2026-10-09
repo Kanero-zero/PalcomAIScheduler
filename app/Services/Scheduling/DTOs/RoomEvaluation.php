@@ -7,6 +7,9 @@ namespace App\Services\Scheduling\DTOs;
  */
 class RoomEvaluation
 {
+    /**
+     * @param  list<RoomEvaluation>  $alternativeRooms
+     */
     public function __construct(
         public int $roomId,
         public string $roomName,
@@ -17,7 +20,18 @@ class RoomEvaluation
         public bool $hasRoomConflict,
         public bool $isValid,
         public string $notes,
+        public array $alternativeRooms = [],
+        public ?RoomEvaluation $suggestedAlternativeRoom = null,
+        public bool $requiresRoomChange = false,
     ) {}
+
+    /**
+     * Determine if a workable room is available (either original or alternative).
+     */
+    public function hasUsableRoom(): bool
+    {
+        return $this->isValid || $this->suggestedAlternativeRoom !== null;
+    }
 
     /**
      * Convert the room evaluation result to an array.
@@ -36,6 +50,10 @@ class RoomEvaluation
             'has_room_conflict' => $this->hasRoomConflict,
             'is_valid' => $this->isValid,
             'notes' => $this->notes,
+            'requires_room_change' => $this->requiresRoomChange,
+            'has_usable_room' => $this->hasUsableRoom(),
+            'suggested_alternative_room' => $this->suggestedAlternativeRoom?->toArray(),
+            'alternative_rooms' => array_map(fn (RoomEvaluation $r) => $r->toArray(), $this->alternativeRooms),
         ];
     }
 }

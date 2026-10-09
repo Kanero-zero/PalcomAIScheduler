@@ -67,8 +67,11 @@ class SchedulingEngine
             $scheduleEvaluations[] = $this->evaluateSchedule($schedule, $instructorId);
         }
 
+        // Resolve potential cross-schedule double booking when multiple affected classes overlap
+        $scheduleEvaluations = $this->resolveCrossScheduleConflicts($scheduleEvaluations);
+
         $totalAffected = count($scheduleEvaluations);
-        $totalResolved = count(array_filter($scheduleEvaluations, fn (ScheduleEvaluation $eval) => $eval->hasCandidate()));
+        $totalResolved = count(array_filter($scheduleEvaluations, fn (ScheduleEvaluation $eval) => $eval->isResolved()));
         $allResolved = $totalAffected > 0 && $totalResolved === $totalAffected;
 
         $summary = $this->buildResultSummary($totalAffected, $totalResolved, $allResolved);
@@ -151,10 +154,27 @@ class SchedulingEngine
 
         $bestCandidate = $validCandidates[0] ?? null;
 
-        $status = ! empty($validCandidates) ? 'resolved' : 'no_candidate';
-        $summary = ! empty($validCandidates)
-            ? 'Ditemukan '.count($validCandidates)." kandidat pengganti yang valid. Rekomendasi utama: {$bestCandidate->instructorName} (Skor: {$bestCandidate->score})."
-            : 'Belum ada instruktur pengganti yang memenuhi kualifikasi kompetensi dan bebas bentrok jadwal untuk kelas ini.';
+        $hasCandidates = ! empty($validCandidates);
+        $hasUsableRoom = $roomEvaluation === null || $roomEvaluation->hasUsableRoom();
+        $requiresRoomChange = $roomEvaluation !== null && $roomEvaluation->requiresRoomChange;
+
+        if ($hasCandidates && $hasUsableRoom) {
+            $status = 'resolved';
+            if ($requiresRoomChange && $roomEvaluation->suggestedAlternativeRoom) {
+                $summary = 'Ditemukan '.count($validCandidates)." kandidat pengganti. Ruangan awal bermasalah ({$roomEvaluation->roomName}), disarankan dialihkan ke {$roomEvaluation->suggestedAlternativeRoom->roomName}. Rekomendasi utama: {$bestCandidate->instructorName} (Skor: {$bestCandidate->score}).";
+            } else {
+                $summary = 'Ditemukan '.count($validCandidates)." kandidat pengganti yang valid. Rekomendasi utama: {$bestCandidate->instructorName} (Skor: {$bestCandidate->score}). Ruangan siap.";
+            }
+        } elseif ($hasCandidates && ! $hasUsableRoom) {
+            $status = 'room_issue';
+            $summary = 'Ditemukan '.count($validCandidates)." kandidat pengganti, namun ruangan bermasalah: {$roomEvaluation->notes}";
+        } elseif (! $hasCandidates && $hasUsableRoom) {
+            $status = 'no_candidate';
+            $summary = 'Belum ada instruktur pengganti yang memenuhi kualifikasi kompetensi dan bebas bentrok jadwal untuk kelas ini.';
+        } else {
+            $status = 'unresolved';
+            $summary = 'Belum ada instruktur pengganti yang memenuhi syarat dan ruangan tidak tersedia.';
+        }
 
         $scheduleDate = $this->normalizeDate($schedule->date);
 
@@ -316,6 +336,22 @@ class SchedulingEngine
             $notes[] = "Ruangan {$room->name} siap digunakan (Kapasitas: {$capacity}, Siswa: {$studentCount}).";
         }
 
+        // If initial room is not valid, search for alternative available rooms
+        $alternativeRooms = [];
+        $suggestedAlternative = null;
+        $requiresRoomChange = false;
+
+        if (! $isValid) {
+            $alternativeRooms = $this->findAlternativeRooms($schedule, $studentCount, $scheduleDate);
+            if (! empty($alternativeRooms)) {
+                $suggestedAlternative = $alternativeRooms[0];
+                $requiresRoomChange = true;
+                $notes[] = "Disarankan pindah ke ruangan alternatif: {$suggestedAlternative->roomName} (Kapasitas: {$suggestedAlternative->capacity}).";
+            } else {
+                $notes[] = 'Tidak ada ruangan alternatif yang kosong dengan kapasitas mencukupi.';
+            }
+        }
+
         return new RoomEvaluation(
             roomId: $room->id,
             roomName: $room->name,
@@ -326,7 +362,150 @@ class SchedulingEngine
             hasRoomConflict: $hasRoomConflict,
             isValid: $isValid,
             notes: implode(' ', $notes),
+            alternativeRooms: $alternativeRooms,
+            suggestedAlternativeRoom: $suggestedAlternative,
+            requiresRoomChange: $requiresRoomChange,
         );
+    }
+
+    /**
+     * Search for alternative available rooms with sufficient capacity.
+     *
+     * @return list<RoomEvaluation>
+     */
+    public function findAlternativeRooms(Schedule $schedule, int $studentCount, string $scheduleDate): array
+    {
+        $candidateRooms = Room::query()
+            ->where('id', '!=', $schedule->room_id)
+            ->where('status', 'available')
+            ->where('capacity', '>=', $studentCount)
+            ->get();
+
+        $alternativeRooms = [];
+        $startTime = $this->normalizeTime($schedule->start_time);
+        $endTime = $this->normalizeTime($schedule->end_time);
+
+        foreach ($candidateRooms as $altRoom) {
+            $hasConflict = Schedule::query()
+                ->where('room_id', $altRoom->id)
+                ->where('id', '!=', $schedule->id)
+                ->whereDate('date', $scheduleDate)
+                ->where('status', '!=', 'cancelled')
+                ->where('start_time', '<', $endTime)
+                ->where('end_time', '>', $startTime)
+                ->exists();
+
+            if (! $hasConflict) {
+                $alternativeRooms[] = new RoomEvaluation(
+                    roomId: $altRoom->id,
+                    roomName: $altRoom->name,
+                    capacity: $altRoom->capacity,
+                    studentCount: $studentCount,
+                    isCapacitySufficient: true,
+                    isStatusAvailable: true,
+                    hasRoomConflict: false,
+                    isValid: true,
+                    notes: "Ruangan alternatif {$altRoom->name} tersedia (Kapasitas: {$altRoom->capacity}, Siswa: {$studentCount}).",
+                );
+            }
+        }
+
+        // Sort by closest capacity fit (smallest sufficient capacity first)
+        usort($alternativeRooms, function (RoomEvaluation $a, RoomEvaluation $b) use ($studentCount) {
+            $diffA = $a->capacity - $studentCount;
+            $diffB = $b->capacity - $studentCount;
+            if ($diffA !== $diffB) {
+                return $diffA <=> $diffB;
+            }
+
+            return strcmp($a->roomName, $b->roomName);
+        });
+
+        return $alternativeRooms;
+    }
+
+    /**
+     * Detect and resolve potential double-booking when the same candidate is assigned to multiple overlapping affected classes.
+     *
+     * @param  list<ScheduleEvaluation>  $evaluations
+     * @return list<ScheduleEvaluation>
+     */
+    protected function resolveCrossScheduleConflicts(array $evaluations): array
+    {
+        /** @var list<array{instructor_id: int, start_time: string, end_time: string, class_name: string}> $allocatedAssignments */
+        $allocatedAssignments = [];
+
+        foreach ($evaluations as $eval) {
+            if (! $eval->bestCandidate) {
+                continue;
+            }
+
+            $candidate = $eval->bestCandidate;
+            $overlapsWithExisting = false;
+            $conflictingClassName = null;
+
+            foreach ($allocatedAssignments as $assignment) {
+                if ($assignment['instructor_id'] === $candidate->instructorId) {
+                    if ($this->intervalsOverlap($assignment['start_time'], $assignment['end_time'], $eval->startTime, $eval->endTime)) {
+                        $overlapsWithExisting = true;
+                        $conflictingClassName = $assignment['class_name'];
+                        break;
+                    }
+                }
+            }
+
+            if ($overlapsWithExisting) {
+                // Find next valid candidate who doesn't conflict with current allocations
+                $nextCandidate = null;
+                foreach ($eval->validCandidates as $altCand) {
+                    if ($altCand->instructorId === $candidate->instructorId) {
+                        continue;
+                    }
+
+                    $altHasOverlap = false;
+                    foreach ($allocatedAssignments as $assignment) {
+                        if ($assignment['instructor_id'] === $altCand->instructorId) {
+                            if ($this->intervalsOverlap($assignment['start_time'], $assignment['end_time'], $eval->startTime, $eval->endTime)) {
+                                $altHasOverlap = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (! $altHasOverlap) {
+                        $nextCandidate = $altCand;
+                        break;
+                    }
+                }
+
+                $warningMessage = "Kandidat {$candidate->instructorName} berpotensi bentrok jika ditugaskan ke dua kelas terdampak sekaligus (bersamaan dengan '{$conflictingClassName}').";
+                $eval->warnings[] = $warningMessage;
+
+                if ($nextCandidate) {
+                    $eval->bestCandidate = $nextCandidate;
+                    $eval->summary .= " (Perhatian: Dialihkan ke {$nextCandidate->instructorName} karena {$candidate->instructorName} sudah ditugaskan pada kelas '{$conflictingClassName}' yang bersamaan).";
+                    $allocatedAssignments[] = [
+                        'instructor_id' => $nextCandidate->instructorId,
+                        'start_time' => $eval->startTime,
+                        'end_time' => $eval->endTime,
+                        'class_name' => $eval->className,
+                    ];
+                } else {
+                    $eval->bestCandidate = null;
+                    $eval->status = 'no_candidate';
+                    $eval->summary = "Kandidat ({$candidate->instructorName}) tidak dapat ditugaskan karena sudah dialokasikan ke kelas '{$conflictingClassName}' yang jadwalnya bersamaan, dan tidak ada kandidat pengganti lain.";
+                }
+            } else {
+                $allocatedAssignments[] = [
+                    'instructor_id' => $candidate->instructorId,
+                    'start_time' => $eval->startTime,
+                    'end_time' => $eval->endTime,
+                    'class_name' => $eval->className,
+                ];
+            }
+        }
+
+        return $evaluations;
     }
 
     /**
@@ -495,13 +674,13 @@ class SchedulingEngine
         }
 
         if ($allResolved) {
-            return "Berhasil menemukan kandidat instruktur pengganti yang valid untuk seluruh {$totalAffected} kelas yang terdampak.";
+            return "Berhasil menemukan solusi yang valid (instruktur dan ruangan) untuk seluruh {$totalAffected} kelas yang terdampak.";
         }
 
         if ($totalResolved > 0) {
-            return "Ditemukan pengganti untuk {$totalResolved} dari {$totalAffected} kelas. Terdapat kelas yang belum memiliki kandidat valid.";
+            return "Berhasil menyelesaikan {$totalResolved} dari {$totalAffected} kelas. Terdapat kelas yang belum terselesaikan (masalah kandidat atau ruangan).";
         }
 
-        return "Belum ada instruktur pengganti yang memenuhi syarat untuk {$totalAffected} kelas yang terdampak.";
+        return "Belum ada solusi yang memenuhi syarat untuk {$totalAffected} kelas yang terdampak (kandidat tidak tersedia atau ruangan bermasalah).";
     }
 }

@@ -239,6 +239,127 @@ test('it runs schedule:evaluate command successfully', function () {
         ->assertSuccessful();
 });
 
+test('it detects room conflict and suggests available alternative room', function () {
+    $date = '2026-11-10';
+    $instructor = Instructor::where('name', 'Wahyu')->firstOrFail();
+    $courseClass = CourseClass::where('subject', 'Microsoft Excel')->firstOrFail();
+
+    // Lab 1 sedang dipakai kelas lain pada jam 13:00 - 15:00
+    $conflictRoom = Room::where('name', 'Lab 1')->firstOrFail();
+    $otherInstructor = Instructor::where('name', 'Dina Oktavia')->firstOrFail();
+    $otherClass = CourseClass::where('subject', 'Desain Grafis')->firstOrFail();
+
+    Schedule::factory()->create([
+        'instructor_id' => $otherInstructor->id,
+        'course_class_id' => $otherClass->id,
+        'room_id' => $conflictRoom->id,
+        'date' => $date,
+        'start_time' => '13:00:00',
+        'end_time' => '15:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    // Kelas terdampak yang ruangannya bentrok
+    $affectedSchedule = Schedule::factory()->create([
+        'instructor_id' => $instructor->id,
+        'course_class_id' => $courseClass->id,
+        'room_id' => $conflictRoom->id,
+        'date' => $date,
+        'start_time' => '13:00:00',
+        'end_time' => '15:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    $eval = $this->engine->evaluateSchedule($affectedSchedule, $instructor->id);
+
+    // Ruangan awal bentrok, tetapi sistem menemukan ruangan alternatif (misal Lab 2)
+    expect($eval->roomEvaluation->hasRoomConflict)->toBeTrue()
+        ->and($eval->roomEvaluation->isValid)->toBeFalse()
+        ->and($eval->roomEvaluation->requiresRoomChange)->toBeTrue()
+        ->and($eval->roomEvaluation->suggestedAlternativeRoom)->not->toBeNull()
+        ->and($eval->isResolved())->toBeTrue()
+        ->and($eval->status)->toBe('resolved')
+        ->and($eval->summary)->toContain('disarankan dialihkan ke');
+});
+
+test('it sets room_issue status when initial room is invalid and no alternative room is available', function () {
+    $date = '2026-11-11';
+    $instructor = Instructor::where('name', 'Wahyu')->firstOrFail();
+    $largeClass = CourseClass::factory()->create(['subject' => 'Microsoft Excel', 'student_count' => 100]);
+    $smallRoom = Room::factory()->create(['name' => 'Ruang Kecil', 'capacity' => 10, 'status' => 'available']);
+
+    // Set semua ruangan lain menjadi penuh / maintenance sehingga tidak ada alternatif kapasitas 100
+    Room::query()->where('id', '!=', $smallRoom->id)->update(['status' => 'maintenance']);
+
+    $affectedSchedule = Schedule::factory()->create([
+        'instructor_id' => $instructor->id,
+        'course_class_id' => $largeClass->id,
+        'room_id' => $smallRoom->id,
+        'date' => $date,
+        'start_time' => '13:00:00',
+        'end_time' => '15:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    $eval = $this->engine->evaluateSchedule($affectedSchedule, $instructor->id);
+
+    expect($eval->hasCandidate())->toBeTrue()
+        ->and($eval->hasValidRoom())->toBeFalse()
+        ->and($eval->isResolved())->toBeFalse()
+        ->and($eval->status)->toBe('room_issue')
+        ->and($eval->summary)->toContain('namun ruangan bermasalah');
+});
+
+test('it detects potential double-booking when a candidate is assigned to two overlapping affected classes', function () {
+    $date = '2026-11-12';
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+    $excelClass1 = CourseClass::where('subject', 'Microsoft Excel')->firstOrFail();
+    $excelClass2 = CourseClass::factory()->create(['name' => 'Excel Paralel', 'subject' => 'Microsoft Excel', 'student_count' => 10]);
+    $room1 = Room::where('name', 'Lab 1')->firstOrFail();
+    $room2 = Room::where('name', 'Lab 2')->firstOrFail();
+
+    // Wahyu memiliki dua kelas terdampak yang jadwalnya BERIRISAN (13:00 - 15:00 dan 14:00 - 16:00)
+    Schedule::factory()->create([
+        'instructor_id' => $wahyu->id,
+        'course_class_id' => $excelClass1->id,
+        'room_id' => $room1->id,
+        'date' => $date,
+        'start_time' => '13:00:00',
+        'end_time' => '15:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    Schedule::factory()->create([
+        'instructor_id' => $wahyu->id,
+        'course_class_id' => $excelClass2->id,
+        'room_id' => $room2->id,
+        'date' => $date,
+        'start_time' => '14:00:00',
+        'end_time' => '16:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    $result = $this->engine->evaluate(
+        instructorId: $wahyu->id,
+        date: $date,
+        startTime: '13:00:00',
+        endTime: '16:00:00',
+    );
+
+    expect($result->totalAffectedSchedules)->toBe(2);
+
+    $eval1 = $result->affectedSchedules[0];
+    $eval2 = $result->affectedSchedules[1];
+
+    // Kelas 1 mendapatkan Kanero (skor tertinggi)
+    expect($eval1->bestCandidate->instructorName)->toBe('Kanero');
+
+    // Kelas 2 mendeteksi Kanero bentrok dengan Kelas 1, sehingga dialihkan ke Budi Santoso
+    expect($eval2->bestCandidate->instructorName)->toBe('Budi Santoso')
+        ->and($eval2->warnings)->not->toBeEmpty()
+        ->and($eval2->warnings[0])->toContain('berpotensi bentrok jika ditugaskan ke dua kelas terdampak sekaligus');
+});
+
 test('it renders ai-scheduler page and livewire component for authenticated user', function () {
     $user = User::factory()->create();
 

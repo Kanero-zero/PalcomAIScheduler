@@ -55,12 +55,29 @@ class RunSchedulingEngineCommand extends Command
 
         foreach ($result->affectedSchedules as $index => $sched) {
             $num = $index + 1;
-            $this->line("<options=bold,underscore>#{$num}. Kelas: {$sched->className} ({$sched->subject})</>");
+            $statusBadge = match ($sched->status) {
+                'resolved' => '<fg=green>[RESOLVED]</>',
+                'room_issue' => '<fg=red>[MASALAH RUANGAN]</>',
+                'no_candidate' => '<fg=yellow>[TIDAK ADA PENGGANTI]</>',
+                default => '<fg=red>[UNRESOLVED]</>',
+            };
+
+            $this->line("{$statusBadge} <options=bold,underscore>#{$num}. Kelas: {$sched->className} ({$sched->subject})</>");
             $this->line("   Waktu   : {$sched->startTime} - {$sched->endTime}");
 
             if ($sched->roomEvaluation) {
-                $roomTag = $sched->roomEvaluation->isValid ? 'info' : 'warn';
+                $roomTag = $sched->roomEvaluation->isValid ? 'info' : ($sched->roomEvaluation->hasUsableRoom() ? 'comment' : 'error');
                 $this->line("   Ruangan : <{$roomTag}>{$sched->roomEvaluation->notes}</{$roomTag}>");
+                if ($sched->roomEvaluation->suggestedAlternativeRoom) {
+                    $alt = $sched->roomEvaluation->suggestedAlternativeRoom;
+                    $this->line("   Alternatif Ruangan: <info>{$alt->roomName} (Kapasitas: {$alt->capacity})</info>");
+                }
+            }
+
+            if (! empty($sched->warnings)) {
+                foreach ($sched->warnings as $warn) {
+                    $this->line("   <fg=yellow;options=bold>[PERINGATAN]</> <comment>{$warn}</comment>");
+                }
             }
 
             $this->newLine();

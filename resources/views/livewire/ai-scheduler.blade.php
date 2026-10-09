@@ -163,10 +163,15 @@
                         </div>
 
                         <div>
-                            @if ($schedule['has_candidate'])
+                            @if ($schedule['status'] === 'resolved')
                                 <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-950/50 dark:text-emerald-400">
                                     <span class="size-1.5 rounded-full bg-emerald-500"></span>
-                                    {{ count($schedule['valid_candidates']) }} {{ __('Kandidat Valid') }}
+                                    {{ count($schedule['valid_candidates']) }} {{ __('Kandidat Valid & Ruangan Siap') }}
+                                </span>
+                            @elseif ($schedule['status'] === 'room_issue')
+                                <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-950/50 dark:text-amber-400">
+                                    <span class="size-1.5 rounded-full bg-amber-500"></span>
+                                    {{ __('Masalah Ruangan') }}
                                 </span>
                             @else
                                 <span class="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-600/20 dark:bg-rose-950/50 dark:text-rose-400">
@@ -178,11 +183,23 @@
                     </div>
 
                     <div class="p-6 space-y-6">
+                        {{-- Peringatan Cross-Schedule / Alokasi --}}
+                        @if (! empty($schedule['warnings']))
+                            <div class="rounded-xl border border-amber-200 bg-amber-50/80 p-3.5 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200 space-y-1">
+                                @foreach ($schedule['warnings'] as $warning)
+                                    <div class="flex items-center gap-2 font-medium">
+                                        <flux:icon name="exclamation-triangle" class="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                                        <span>{{ $warning }}</span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        @endif
+
                         {{-- Pemeriksaan Ruangan --}}
                         @if (isset($schedule['room']))
-                            <div class="rounded-xl border p-3.5 text-xs {{ $schedule['room']['is_valid'] ? 'border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/30' : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200' }}">
+                            <div class="rounded-xl border p-3.5 text-xs {{ $schedule['room']['is_valid'] ? 'border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-800/30' : ($schedule['room']['has_usable_room'] ? 'border-blue-200 bg-blue-50/70 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200' : 'border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200') }}">
                                 <div class="flex items-center gap-2 font-medium">
-                                    <flux:icon name="{{ $schedule['room']['is_valid'] ? 'check-circle' : 'exclamation-circle' }}" class="size-4 {{ $schedule['room']['is_valid'] ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400' }}" />
+                                    <flux:icon name="{{ $schedule['room']['is_valid'] ? 'check-circle' : ($schedule['room']['has_usable_room'] ? 'arrow-path' : 'exclamation-circle') }}" class="size-4 {{ $schedule['room']['is_valid'] ? 'text-emerald-600 dark:text-emerald-400' : ($schedule['room']['has_usable_room'] ? 'text-[#1565D8] dark:text-blue-400' : 'text-rose-600 dark:text-rose-400') }}" />
                                     <span>{{ __('Status Ruangan:') }} {{ $schedule['room']['notes'] }}</span>
                                 </div>
                             </div>

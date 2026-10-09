@@ -11,6 +11,7 @@ class ScheduleEvaluation
      * @param  list<CandidateEvaluation>  $candidates
      * @param  list<CandidateEvaluation>  $validCandidates
      * @param  list<CandidateEvaluation>  $disqualifiedCandidates
+     * @param  list<string>  $warnings
      */
     public function __construct(
         public int $scheduleId,
@@ -27,14 +28,31 @@ class ScheduleEvaluation
         public array $disqualifiedCandidates,
         public ?CandidateEvaluation $bestCandidate,
         public string $summary,
+        public array $warnings = [],
     ) {}
 
     /**
-     * Determine if a valid replacement was found.
+     * Determine if a valid replacement instructor was found.
      */
     public function hasCandidate(): bool
     {
         return ! empty($this->validCandidates);
+    }
+
+    /**
+     * Determine if a workable room is available (original or alternative).
+     */
+    public function hasValidRoom(): bool
+    {
+        return $this->roomEvaluation === null || $this->roomEvaluation->hasUsableRoom();
+    }
+
+    /**
+     * Determine if the schedule is fully resolved (both instructor and room are valid).
+     */
+    public function isResolved(): bool
+    {
+        return $this->hasCandidate() && $this->hasValidRoom();
     }
 
     /**
@@ -54,11 +72,14 @@ class ScheduleEvaluation
             'end_time' => $this->endTime,
             'room' => $this->roomEvaluation?->toArray(),
             'status' => $this->status,
+            'is_resolved' => $this->isResolved(),
             'has_candidate' => $this->hasCandidate(),
+            'has_valid_room' => $this->hasValidRoom(),
             'best_candidate' => $this->bestCandidate?->toArray(),
             'valid_candidates' => array_map(fn (CandidateEvaluation $c) => $c->toArray(), $this->validCandidates),
             'disqualified_candidates' => array_map(fn (CandidateEvaluation $c) => $c->toArray(), $this->disqualifiedCandidates),
             'summary' => $this->summary,
+            'warnings' => $this->warnings,
         ];
     }
 }
