@@ -39,6 +39,11 @@
                     <span wire:loading.remove wire:target="runScheduler">{{ __('Jalankan Engine') }}</span>
                     <span wire:loading wire:target="runScheduler">{{ __('Menganalisis...') }}</span>
                 </flux:button>
+
+                {{-- Placeholder UI only. Activate when backend Gemini action is available and tested. --}}
+                <flux:button type="button" variant="outline" icon="sparkles" disabled title="Menunggu integrasi backend Gemini API">
+                    {{ __('Analisis dengan Gemini AI') }}
+                </flux:button>
             </div>
         </div>
 
@@ -117,7 +122,7 @@
                         <div class="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
                             {{ $result['total_resolved_schedules'] }}
                         </div>
-                        <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Kandidat Ditemukan') }}</div>
+                        <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Kelas Terselesaikan') }}</div>
                     </div>
                 </div>
             </div>
@@ -342,5 +347,29 @@
                 </div>
             @endforelse
         </div>
+
+        {{-- Gemini Recommendation Layer: presentation placeholder, not an AI result. --}}
+        <section aria-labelledby="gemini-recommendation-heading" class="overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-xs dark:border-blue-900 dark:bg-zinc-900">
+            <div class="flex flex-col gap-3 border-b border-blue-100 bg-blue-50/50 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6 dark:border-blue-900/40 dark:bg-blue-950/20">
+                <div class="flex min-w-0 items-center gap-3">
+                    <span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[#1565D8] text-white">
+                        <flux:icon name="sparkles" class="size-5" />
+                    </span>
+                    <div class="min-w-0 space-y-1">
+                        <h3 id="gemini-recommendation-heading" class="text-base font-semibold text-zinc-900 dark:text-white">{{ __('Analisis Gemini AI') }}</h3>
+                        <p class="text-xs text-zinc-600 dark:text-zinc-400">{{ __('Lapisan analisis tambahan, terpisah dari Scheduling Engine deterministik.') }}</p>
+                    </div>
+                </div>
+                <span class="inline-flex w-fit shrink-0 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">{{ __('Menunggu integrasi API') }}</span>
+            </div>
+            <div class="space-y-3 p-5 sm:p-6">
+                <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ __('Belum ada analisis AI untuk pengajuan ini.') }}</p>
+                <p class="text-sm leading-6 text-zinc-600 dark:text-zinc-400">{{ __('Setelah integrasi backend selesai, admin dapat meminta Gemini menilai kandidat yang telah lolos pemeriksaan kompetensi, bentrok jadwal, dan ruangan. Hasil AI akan ditampilkan di sini bersama penjelasan alasannya.') }}</p>
+                <div class="flex items-start gap-2 rounded-lg bg-zinc-50 p-3 text-xs leading-5 text-zinc-600 dark:bg-zinc-800/50 dark:text-zinc-300">
+                    <flux:icon name="shield-check" class="mt-0.5 size-4 shrink-0 text-[#1565D8] dark:text-blue-300" />
+                    <p>{{ __('Gemini hanya memberi rekomendasi, tidak mengubah jadwal otomatis. Jika API gagal, hasil Scheduling Engine tetap digunakan.') }}</p>
+                </div>
+            </div>
+        </section>
     @endif
 </div>
