@@ -22,7 +22,7 @@
                     {{ __('Tabel / Kalender Jadwal Mengajar') }}
                 </h3>
                 <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                    {{ __('Partner tim dapat menambahkan tabel jadwal, kalender interaktif, atau filter tanggal di bagian ini.') }}
+                    {{ __('Jadwal kelas, instruktur pengajar, dan alokasi ruangan akan ditampilkan pada halaman ini. Tampilan jadwal belum tersedia.') }}
                 </p>
             </div>
         </div>

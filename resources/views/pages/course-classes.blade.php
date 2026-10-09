@@ -22,7 +22,7 @@
                     {{ __('Daftar Kelas Kursus & Materi') }}
                 </h3>
                 <p class="text-sm text-zinc-500 dark:text-zinc-400">
-                    {{ __('Partner tim dapat menambahkan tabel batch kelas, mata pelajaran (Excel, Word, dll), dan jumlah murid di sini.') }}
+                    {{ __('Daftar kelas kursus beserta materi dan jumlah peserta akan ditampilkan pada halaman ini. Tampilan daftar kelas belum tersedia.') }}
                 </p>
             </div>
         </div>
