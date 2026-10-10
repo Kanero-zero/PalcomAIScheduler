@@ -33,6 +33,12 @@ class AppServiceProvider extends ServiceProvider
                 ? Response::allow()
                 : Response::deny('Hanya pengguna dengan hak akses administrator yang dapat menjalankan analisis Gemini AI.');
         });
+
+        Gate::define('manage-schedule-approval', function (User $user): Response {
+            return $user->isAdmin()
+                ? Response::allow()
+                : Response::deny('Hanya pengguna dengan hak akses administrator yang dapat melakukan persetujuan atau penolakan penggantian instruktur.');
+        });
     }
 
     /**

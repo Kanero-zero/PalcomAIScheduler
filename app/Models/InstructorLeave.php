@@ -6,6 +6,7 @@ use Database\Factories\InstructorLeaveFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
 /**
@@ -52,5 +53,15 @@ class InstructorLeave extends Model
     public function instructor(): BelongsTo
     {
         return $this->belongsTo(Instructor::class);
+    }
+
+    /**
+     * Keputusan pergantian instruktur untuk jadwal-jadwal yang terdampak izin ini.
+     *
+     * @return HasMany<ScheduleSubstitution, $this>
+     */
+    public function substitutions(): HasMany
+    {
+        return $this->hasMany(ScheduleSubstitution::class, 'instructor_leave_id');
     }
 }
