@@ -18,6 +18,9 @@
                     <flux:sidebar.item icon="sparkles" :href="route('ai-scheduler')" :current="request()->routeIs('ai-scheduler')" wire:navigate>
                         {{ __('AI Auto-Scheduler') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="clock" :href="route('activity-log')" :current="request()->routeIs('activity-log')" wire:navigate>
+                        {{ __('Activity Log') }}
+                    </flux:sidebar.item>
                     <flux:sidebar.item icon="calendar" :href="route('schedules.index')" :current="request()->routeIs('schedules.*')" wire:navigate>
                         {{ __('Jadwal Mengajar') }}
                     </flux:sidebar.item>
