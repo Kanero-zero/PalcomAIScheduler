@@ -30,6 +30,7 @@ class ScheduleEvaluation
         public string $summary,
         public array $warnings = [],
         public ?array $aiRecommendation = null,
+        public ?array $approvalStatus = null,
     ) {}
 
     /**
@@ -45,7 +46,7 @@ class ScheduleEvaluation
      */
     public function hasValidRoom(): bool
     {
-        return $this->roomEvaluation === null || $this->roomEvaluation->hasUsableRoom();
+        return $this->roomEvaluation !== null && $this->roomEvaluation->hasUsableRoom();
     }
 
     /**
@@ -53,6 +54,14 @@ class ScheduleEvaluation
      */
     public function isResolved(): bool
     {
+        if ($this->approvalStatus !== null && ($this->approvalStatus['status'] ?? null) === 'approved') {
+            return true;
+        }
+
+        if ($this->approvalStatus !== null && ($this->approvalStatus['status'] ?? null) === 'rejected') {
+            return false;
+        }
+
         return $this->status === 'resolved' && $this->hasCandidate() && $this->hasValidRoom();
     }
 
@@ -82,6 +91,20 @@ class ScheduleEvaluation
             'summary' => $this->summary,
             'warnings' => $this->warnings,
             'ai_recommendation' => $this->aiRecommendation,
+            'approval_status' => $this->approvalStatus ?? [
+                'is_decided' => false,
+                'status' => 'pending',
+                'substitution_id' => null,
+                'original_instructor_id' => null,
+                'original_instructor_name' => null,
+                'replacement_instructor_id' => null,
+                'replacement_instructor_name' => null,
+                'decision_by' => null,
+                'decision_by_name' => null,
+                'decision_at' => null,
+                'rejection_reason' => null,
+                'notes' => null,
+            ],
         ];
     }
 }

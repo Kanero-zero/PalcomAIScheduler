@@ -6,6 +6,7 @@ use App\Models\Instructor;
 use App\Models\InstructorLeave;
 use App\Models\Room;
 use App\Models\Schedule;
+use App\Models\ScheduleSubstitution;
 use App\Services\Scheduling\DTOs\CandidateEvaluation;
 use App\Services\Scheduling\DTOs\RoomEvaluation;
 use App\Services\Scheduling\DTOs\ScheduleEvaluation;
@@ -70,11 +71,15 @@ class SchedulingEngine
         $normalizedStart = $this->normalizeTime($startTime);
         $normalizedEnd = $this->normalizeTime($endTime);
 
-        $affectedSchedules = $this->findAffectedSchedules($instructorId, $dateString, $normalizedStart, $normalizedEnd);
+        $affectedSchedules = $this->findAffectedSchedules($instructorId, $dateString, $normalizedStart, $normalizedEnd, $leaveId);
 
         $scheduleEvaluations = [];
         foreach ($affectedSchedules as $schedule) {
-            $scheduleEvaluations[] = $this->evaluateSchedule($schedule, $instructorId);
+            $sub = $leaveId && $schedule->relationLoaded('substitutions')
+                ? $schedule->substitutions->firstWhere('instructor_leave_id', $leaveId)
+                : null;
+            $excludeId = $sub?->original_instructor_id ?? $instructorId;
+            $scheduleEvaluations[] = $this->evaluateSchedule($schedule, $excludeId, $leaveId, $sub);
         }
 
         // Resolve potential cross-schedule double booking when multiple affected classes overlap
@@ -112,14 +117,35 @@ class SchedulingEngine
         string $date,
         string $startTime,
         string $endTime,
+        ?int $leaveId = null,
     ): Collection {
         return Schedule::query()
-            ->where('instructor_id', $instructorId)
             ->whereDate('date', $date)
             ->where('status', '!=', 'cancelled')
             ->where('start_time', '<', $endTime)
             ->where('end_time', '>', $startTime)
-            ->with(['courseClass', 'room', 'instructor'])
+            ->where(function ($query) use ($instructorId, $leaveId) {
+                $query->where('instructor_id', $instructorId);
+
+                if ($leaveId !== null) {
+                    $query->orWhereHas('substitutions', function ($subQuery) use ($leaveId) {
+                        $subQuery->where('instructor_leave_id', $leaveId);
+                    });
+                }
+            })
+            ->with([
+                'courseClass',
+                'room',
+                'instructor',
+                'substitutions' => function ($q) use ($leaveId) {
+                    if ($leaveId !== null) {
+                        $q->where('instructor_leave_id', $leaveId);
+                    }
+                },
+                'substitutions.originalInstructor',
+                'substitutions.replacementInstructor',
+                'substitutions.decisionMaker',
+            ])
             ->orderBy('start_time')
             ->get();
     }
@@ -127,8 +153,18 @@ class SchedulingEngine
     /**
      * Evaluate replacement candidates and room for a single affected schedule.
      */
-    public function evaluateSchedule(Schedule $schedule, ?int $excludedInstructorId = null): ScheduleEvaluation
-    {
+    public function evaluateSchedule(
+        Schedule $schedule,
+        ?int $excludedInstructorId = null,
+        ?int $leaveId = null,
+        ?ScheduleSubstitution $substitution = null,
+    ): ScheduleEvaluation {
+        if ($substitution === null && $leaveId !== null) {
+            $substitution = $schedule->relationLoaded('substitutions')
+                ? $schedule->substitutions->firstWhere('instructor_leave_id', $leaveId)
+                : ScheduleSubstitution::where('instructor_leave_id', $leaveId)->where('schedule_id', $schedule->id)->first();
+        }
+
         $roomEvaluation = $schedule->room ? $this->evaluateRoom($schedule->room, $schedule) : null;
 
         $candidates = Instructor::query()
@@ -165,7 +201,7 @@ class SchedulingEngine
         $bestCandidate = $validCandidates[0] ?? null;
 
         $hasCandidates = ! empty($validCandidates);
-        $hasUsableRoom = $roomEvaluation === null || $roomEvaluation->hasUsableRoom();
+        $hasUsableRoom = $roomEvaluation !== null && $roomEvaluation->hasUsableRoom();
         $requiresRoomChange = $roomEvaluation !== null && $roomEvaluation->requiresRoomChange;
 
         if ($hasCandidates && $hasUsableRoom) {
@@ -177,13 +213,71 @@ class SchedulingEngine
             }
         } elseif ($hasCandidates && ! $hasUsableRoom) {
             $status = 'room_issue';
-            $summary = 'Ditemukan '.count($validCandidates)." kandidat pengganti, namun ruangan bermasalah: {$roomEvaluation->notes}";
+            $roomNotes = $roomEvaluation ? $roomEvaluation->notes : 'Jadwal tidak memiliki alokasi ruangan yang valid.';
+            $summary = 'Ditemukan '.count($validCandidates)." kandidat pengganti, namun ruangan bermasalah: {$roomNotes}";
         } elseif (! $hasCandidates && $hasUsableRoom) {
             $status = 'no_candidate';
             $summary = 'Belum ada instruktur pengganti yang memenuhi kualifikasi kompetensi dan bebas bentrok jadwal untuk kelas ini.';
         } else {
             $status = 'unresolved';
             $summary = 'Belum ada instruktur pengganti yang memenuhi syarat dan ruangan tidak tersedia.';
+        }
+
+        // Resolve approval status
+        $approvalStatus = null;
+        if ($substitution !== null) {
+            $isApproved = $substitution->status === 'approved';
+            $isRejected = $substitution->status === 'rejected';
+
+            $approvalStatus = [
+                'is_decided' => $isApproved || $isRejected,
+                'status' => $substitution->status,
+                'substitution_id' => $substitution->id,
+                'original_instructor_id' => $substitution->original_instructor_id,
+                'original_instructor_name' => $substitution->originalInstructor?->name ?? $schedule->instructor?->name,
+                'replacement_instructor_id' => $substitution->replacement_instructor_id,
+                'replacement_instructor_name' => $substitution->replacementInstructor?->name,
+                'decision_by' => $substitution->decision_by,
+                'decision_by_name' => $substitution->decisionMaker?->name,
+                'decision_at' => $substitution->decision_at?->toIso8601String(),
+                'rejection_reason' => $substitution->rejection_reason,
+                'notes' => $substitution->notes,
+            ];
+
+            if ($isApproved) {
+                $status = 'resolved';
+                $assignedName = $substitution->replacementInstructor?->name ?? 'Instruktur Pengganti';
+                $summary = "Persetujuan final: Instruktur pengganti {$assignedName} telah disetujui dan ditugaskan.";
+
+                // Pastikan bestCandidate merefleksikan instruktur pengganti yang disetujui jika ada
+                if ($substitution->replacement_instructor_id) {
+                    foreach ($allEvaluations as $candidateEval) {
+                        if ($candidateEval->instructorId === $substitution->replacement_instructor_id) {
+                            $bestCandidate = $candidateEval;
+                            break;
+                        }
+                    }
+                }
+            } elseif ($isRejected) {
+                $status = 'attention_needed';
+                $summary = "Rekomendasi instruktur pengganti ditolak: {$substitution->rejection_reason}";
+            }
+        } elseif ($excludedInstructorId !== null) {
+            $originalInstructor = Instructor::find($excludedInstructorId);
+            $approvalStatus = [
+                'is_decided' => false,
+                'status' => 'pending',
+                'substitution_id' => null,
+                'original_instructor_id' => $excludedInstructorId,
+                'original_instructor_name' => $originalInstructor?->name ?? $schedule->instructor?->name,
+                'replacement_instructor_id' => null,
+                'replacement_instructor_name' => null,
+                'decision_by' => null,
+                'decision_by_name' => null,
+                'decision_at' => null,
+                'rejection_reason' => null,
+                'notes' => null,
+            ];
         }
 
         $scheduleDate = $this->normalizeDate($schedule->date);
@@ -203,6 +297,9 @@ class SchedulingEngine
             disqualifiedCandidates: $disqualifiedCandidates,
             bestCandidate: $bestCandidate,
             summary: $summary,
+            warnings: [],
+            aiRecommendation: null,
+            approvalStatus: $approvalStatus,
         );
     }
 
@@ -482,6 +579,18 @@ class SchedulingEngine
         $allocatedAssignments = [];
 
         foreach ($evaluations as $eval) {
+            // Jika jadwal ini sudah disetujui, instruktur penggantinya sudah pasti teralokasi
+            if ($eval->approvalStatus !== null && ($eval->approvalStatus['status'] ?? null) === 'approved' && ! empty($eval->approvalStatus['replacement_instructor_id'])) {
+                $allocatedAssignments[] = [
+                    'instructor_id' => (int) $eval->approvalStatus['replacement_instructor_id'],
+                    'start_time' => $eval->startTime,
+                    'end_time' => $eval->endTime,
+                    'class_name' => $eval->className,
+                ];
+
+                continue;
+            }
+
             if (! $eval->bestCandidate) {
                 continue;
             }
