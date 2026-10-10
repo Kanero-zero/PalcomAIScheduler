@@ -528,22 +528,23 @@ test('it sets best_candidate_id to null and warns if all ai candidates have cros
         ->and($rec2['summary_explanation'])->toContain('Seluruh kandidat pengganti bentrok penugasan');
 });
 
-test('it correctly identifies admin users via isAdmin method', function () {
+test('it correctly identifies admin users strictly via allowlist in isAdmin method', function () {
     $admin1 = User::where('email', 'admin@palcomtech.ac.id')->firstOrFail();
     $admin2 = User::where('email', 'admin@example.com')->firstOrFail();
-    $admin3 = User::factory()->create(['email' => 'admin_baak@palcomtech.ac.id']);
+    $spoofedUser = User::factory()->create(['email' => 'admin_test@gmail.com']);
     $regularUser = User::factory()->create(['email' => 'dosen@palcomtech.ac.id']);
     $outsideUser = User::factory()->create(['email' => 'student@gmail.com']);
 
     expect($admin1->isAdmin())->toBeTrue()
         ->and($admin2->isAdmin())->toBeTrue()
-        ->and($admin3->isAdmin())->toBeTrue()
+        ->and($spoofedUser->isAdmin())->toBeFalse()
         ->and($regularUser->isAdmin())->toBeFalse()
         ->and($outsideUser->isAdmin())->toBeFalse();
 });
 
-test('it authorizes admin user to execute analyzeWithAi successfully', function () {
+test('it authorizes allowlisted admin user to execute analyzeWithAi successfully', function () {
     $admin = User::factory()->admin()->create();
+    expect($admin->isAdmin())->toBeTrue();
     $this->actingAs($admin);
 
     Http::fake([
@@ -608,6 +609,37 @@ test('it rejects regular non-admin user with 403 on analyzeWithAi without callin
         ->assertForbidden();
 
     // Pastikan pengguna yang ditolak tidak menyebabkan request ke Gemini API
+    Http::assertNothingSent();
+});
+
+test('it rejects user with spoofed email prefix like admin_test@gmail.com with 403 without calling Gemini API', function () {
+    $spoofedUser = User::factory()->create(['email' => 'admin_test@gmail.com']);
+    expect($spoofedUser->isAdmin())->toBeFalse();
+
+    $this->actingAs($spoofedUser);
+
+    Http::fake();
+
+    $leave = InstructorLeave::firstOrFail();
+
+    // 1. Ditolak pada AiScheduler
+    Livewire::test(AiScheduler::class)
+        ->call('selectLeave', $leave->id)
+        ->call('analyzeWithAi')
+        ->assertForbidden();
+
+    // 2. Ditolak pada InstructorLeaveForm
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+    Livewire::test(InstructorLeaveForm::class)
+        ->set('form.instructor_id', $wahyu->id)
+        ->set('form.date', '2026-11-25')
+        ->set('form.start_time', '13:00')
+        ->set('form.end_time', '15:00')
+        ->call('submitLeave')
+        ->call('analyzeWithAi')
+        ->assertForbidden();
+
+    // Pastikan pengguna berpura-pura admin tidak menyebabkan request ke Gemini API
     Http::assertNothingSent();
 });
 

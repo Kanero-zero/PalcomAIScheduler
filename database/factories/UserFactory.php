@@ -63,9 +63,15 @@ class UserFactory extends Factory
      */
     public function admin(): static
     {
-        return $this->state(fn (array $attributes) => [
-            'name' => 'Admin '.fake()->lastName(),
-            'email' => 'admin_'.Str::lower(Str::random(6)).'@palcomtech.ac.id',
-        ]);
+        return $this->state(function (array $attributes) {
+            $email = 'admin_'.Str::lower(Str::random(6)).'@palcomtech.ac.id';
+            $current = (array) config('auth.admin_emails', ['admin@palcomtech.ac.id', 'admin@example.com']);
+            config()->set('auth.admin_emails', array_values(array_unique([...$current, $email])));
+
+            return [
+                'name' => 'Admin '.fake()->lastName(),
+                'email' => $email,
+            ];
+        });
     }
 }
