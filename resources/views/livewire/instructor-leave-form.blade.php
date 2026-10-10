@@ -105,6 +105,41 @@
                 </div>
             </div>
 
+            {{-- Tombol Trigger AI Opsional (Hanya Saat Diminta Admin) --}}
+            @if ($submittedLeaveId && ! empty($schedulingResult['affected_schedules']))
+                <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3.5 dark:border-blue-900/60 dark:bg-blue-950/30">
+                    <div class="flex items-center gap-2">
+                        <flux:icon name="sparkles" class="size-4 text-[#1565D8] dark:text-blue-400" />
+                        <div>
+                            <span class="text-xs font-bold text-zinc-900 dark:text-white">{{ __('Analisis Lanjutan: Google Gemini 3.5 Flash-Lite') }}</span>
+                            <p class="text-[11px] text-zinc-500 dark:text-zinc-400">{{ __('Dapatkan peringkat AI dan penjelasan komprehensif dalam Bahasa Indonesia.') }}</p>
+                        </div>
+                    </div>
+                    <flux:button
+                        wire:click="analyzeWithAi"
+                        variant="primary"
+                        icon="sparkles"
+                        class="bg-[#1565D8] hover:bg-[#0A3D91] text-xs font-semibold text-white"
+                    >
+                        <span wire:loading.remove wire:target="analyzeWithAi">{{ __('Minta Analisis Gemini AI') }}</span>
+                        <span wire:loading wire:target="analyzeWithAi">{{ __('Menganalisis dengan Gemini...') }}</span>
+                    </flux:button>
+                </div>
+            @endif
+
+            {{-- Ringkasan Eksekutif AI (Jika Sudah Dianalisis) --}}
+            @if (! empty($schedulingResult['ai_summary']['executive_summary']))
+                <div class="mb-4 rounded-xl border {{ ($schedulingResult['ai_summary']['fallback_used'] ?? false) ? 'border-amber-200 bg-amber-50/70 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200' : 'border-cyan-200 bg-cyan-50/60 text-cyan-900 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-200' }} p-4">
+                    <div class="flex items-start gap-2.5">
+                        <flux:icon name="{{ ($schedulingResult['ai_summary']['fallback_used'] ?? false) ? 'exclamation-circle' : 'information-circle' }}" class="size-4 shrink-0 mt-0.5 {{ ($schedulingResult['ai_summary']['fallback_used'] ?? false) ? 'text-amber-700 dark:text-amber-400' : 'text-cyan-700 dark:text-cyan-400' }}" />
+                        <div class="text-xs">
+                            <span class="font-bold">{{ ($schedulingResult['ai_summary']['fallback_used'] ?? false) ? __('Ringkasan Sistem (Fallback):') : __('Ringkasan Eksekutif (Gemini AI):') }}</span>
+                            <p class="mt-1 leading-relaxed">{{ $schedulingResult['ai_summary']['executive_summary'] }}</p>
+                        </div>
+                    </div>
+                </div>
+            @endif
+
             @if (empty($schedulingResult['affected_schedules']))
                 <div class="rounded-xl border border-dashed border-zinc-200 p-8 text-center dark:border-zinc-800">
                     <flux:icon name="calendar" class="mx-auto size-8 text-zinc-400" />
@@ -153,7 +188,7 @@
                                 </div>
                             @endif
 
-                            {{-- Rekomendasi Utama --}}
+                            {{-- Rekomendasi Utama Deterministik --}}
                             @if ($sched['best_candidate'])
                                 <div class="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/40 dark:bg-blue-950/20">
                                     <div class="flex items-center justify-between">
@@ -175,6 +210,58 @@
                                             <li>{{ $reason }}</li>
                                         @endforeach
                                     </ul>
+                                </div>
+                            @endif
+
+                            {{-- Penjelasan & Analisis AI (Jika Ada) --}}
+                            @if (! empty($sched['ai_recommendation']['summary_explanation']))
+                                <div class="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 dark:border-indigo-900/40 dark:bg-indigo-950/30">
+                                    <div class="flex items-center justify-between border-b border-indigo-100 pb-2 dark:border-indigo-900/50">
+                                        <div class="flex items-center gap-2">
+                                            <flux:icon name="sparkles" class="size-3.5 text-indigo-600 dark:text-indigo-400" />
+                                            <span class="text-xs font-bold text-indigo-950 dark:text-indigo-200">
+                                                {{ __('Penjelasan Gemini 3.5 Flash-Lite') }}
+                                            </span>
+                                        </div>
+                                        @if (($sched['ai_recommendation']['status'] ?? '') === 'fallback')
+                                            <span class="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-800 dark:bg-rose-900/60 dark:text-rose-200">
+                                                {{ __('Mode Fallback') }}
+                                            </span>
+                                        @elseif (($sched['ai_recommendation']['status'] ?? '') === 'not_applicable')
+                                            <span class="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                                {{ __('N/A') }}
+                                            </span>
+                                        @else
+                                            <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
+                                                {{ __('AI Active') }}
+                                            </span>
+                                        @endif
+                                    </div>
+                                    <p class="mt-2 text-xs leading-relaxed text-indigo-950 dark:text-indigo-200">
+                                        {{ $sched['ai_recommendation']['summary_explanation'] }}
+                                    </p>
+
+                                    @if (! empty($sched['ai_recommendation']['rankings']))
+                                        <div class="mt-2.5 space-y-1.5 border-t border-indigo-100 pt-2 dark:border-indigo-900/40">
+                                            @foreach ($sched['ai_recommendation']['rankings'] as $aiRank)
+                                                <div class="flex items-start justify-between gap-2 text-[11px]">
+                                                    <span class="font-medium text-indigo-900 dark:text-indigo-300">
+                                                        #{{ $aiRank['rank'] }}. {{ $aiRank['instructor_name'] }}:
+                                                        <span class="font-normal text-zinc-600 dark:text-zinc-400">{{ $aiRank['ai_reasoning'] }}</span>
+                                                    </span>
+                                                    @if (! is_null($aiRank['confidence_score']))
+                                                        <span class="shrink-0 font-semibold text-indigo-700 dark:text-indigo-300">
+                                                            {{ $aiRank['confidence_score'] }}%
+                                                        </span>
+                                                    @else
+                                                        <span class="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                                            {{ __('Deterministik') }}
+                                                        </span>
+                                                    @endif
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    @endif
                                 </div>
                             @endif
 

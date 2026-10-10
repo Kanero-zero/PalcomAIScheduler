@@ -15,25 +15,29 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // 1. Akun Login untuk Admin BAAK PalComTech
-        User::updateOrCreate(
-            ['email' => 'admin@palcomtech.ac.id'],
-            [
-                'name' => 'Admin BAAK PalComTech',
-                'password' => 'password',
-                'email_verified_at' => now(),
-            ]
-        );
+        // 1. Akun Login untuk Pengembangan & Demonstrasi (Hanya untuk non-produksi)
+        if (app()->environment('production')) {
+            $this->command?->warn('Melewatkan pembuatan akun admin default demo pada lingkungan produksi demi keamanan.');
+        } else {
+            User::updateOrCreate(
+                ['email' => 'admin@palcomtech.ac.id'],
+                [
+                    'name' => 'Admin BAAK PalComTech',
+                    'password' => 'password',
+                    'email_verified_at' => now(),
+                ]
+            );
 
-        // Akun Login Cadangan (Demo)
-        User::updateOrCreate(
-            ['email' => 'admin@example.com'],
-            [
-                'name' => 'Admin Demo',
-                'password' => 'password',
-                'email_verified_at' => now(),
-            ]
-        );
+            // Akun Login Cadangan (Demo)
+            User::updateOrCreate(
+                ['email' => 'admin@example.com'],
+                [
+                    'name' => 'Admin Demo',
+                    'password' => 'password',
+                    'email_verified_at' => now(),
+                ]
+            );
+        }
 
         // 2. Data Master & Transaksi Penjadwalan
         $this->call([

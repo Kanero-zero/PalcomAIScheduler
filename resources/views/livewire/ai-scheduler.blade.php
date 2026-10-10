@@ -40,9 +40,17 @@
                     <span wire:loading wire:target="runScheduler">{{ __('Menganalisis...') }}</span>
                 </flux:button>
 
-                {{-- Placeholder UI only. Activate when backend Gemini action is available and tested. --}}
-                <flux:button type="button" variant="outline" icon="sparkles" disabled title="Menunggu integrasi backend Gemini API">
-                    {{ __('Analisis dengan Gemini AI') }}
+                <flux:button
+                    type="button"
+                    wire:click="analyzeWithAi"
+                    variant="outline"
+                    icon="sparkles"
+                    class="border-blue-300 text-[#1565D8] hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                    wire:loading.attr="disabled"
+                    wire:target="analyzeWithAi"
+                >
+                    <span wire:loading.remove wire:target="analyzeWithAi">{{ __('Analisis dengan Gemini AI') }}</span>
+                    <span wire:loading wire:target="analyzeWithAi">{{ __('Menganalisis...') }}</span>
                 </flux:button>
             </div>
         </div>
@@ -65,6 +73,16 @@
             </div>
         @endif
     </div>
+
+    {{-- Pesan Notifikasi / Feedback --}}
+    @if ($feedbackMessage)
+        <div class="rounded-xl border {{ ($result['ai_summary']['fallback_used'] ?? false) ? 'border-amber-200 bg-amber-50/70 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200' : 'border-blue-200 bg-blue-50/70 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200' }} p-3.5 text-xs font-medium">
+            <div class="flex items-center gap-2">
+                <flux:icon name="{{ ($result['ai_summary']['fallback_used'] ?? false) ? 'exclamation-circle' : 'sparkles' }}" class="size-4 shrink-0" />
+                <span>{{ $feedbackMessage }}</span>
+            </div>
+        </div>
+    @endif
 
     {{-- Hasil Evaluasi Scheduler --}}
     @if ($result)
@@ -210,6 +228,36 @@
                             </div>
                         @endif
 
+                        {{-- Penjelasan Gemini 3.5 Flash-Lite (Jika Ada) --}}
+                        @if (! empty($schedule['ai_recommendation']['summary_explanation']))
+                            <div class="rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 text-xs dark:border-indigo-900/50 dark:bg-indigo-950/30">
+                                <div class="flex items-center justify-between border-b border-indigo-100 pb-2 dark:border-indigo-900/50">
+                                    <div class="flex items-center gap-2">
+                                        <flux:icon name="sparkles" class="size-4 text-indigo-600 dark:text-indigo-400" />
+                                        <span class="font-bold text-indigo-950 dark:text-indigo-200">
+                                            {{ __('Penjelasan Gemini 3.5 Flash-Lite') }}
+                                        </span>
+                                    </div>
+                                    @if (($schedule['ai_recommendation']['status'] ?? '') === 'fallback')
+                                        <span class="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-800 dark:bg-rose-900/60 dark:text-rose-200">
+                                            {{ __('Mode Fallback') }}
+                                        </span>
+                                    @elseif (($schedule['ai_recommendation']['status'] ?? '') === 'not_applicable')
+                                        <span class="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                            {{ __('N/A') }}
+                                        </span>
+                                    @else
+                                        <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
+                                            {{ __('AI Active') }}
+                                        </span>
+                                    @endif
+                                </div>
+                                <p class="mt-2 leading-relaxed text-indigo-950 dark:text-indigo-200">
+                                    {{ $schedule['ai_recommendation']['summary_explanation'] }}
+                                </p>
+                            </div>
+                        @endif
+
                         {{-- Rekomendasi Kandidat Valid --}}
                         @if (! empty($schedule['valid_candidates']))
                             <div class="space-y-3">
@@ -348,7 +396,7 @@
             @endforelse
         </div>
 
-        {{-- Gemini Recommendation Layer: presentation placeholder, not an AI result. --}}
+        {{-- Gemini Recommendation Layer --}}
         <section aria-labelledby="gemini-recommendation-heading" class="overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-xs dark:border-blue-900 dark:bg-zinc-900">
             <div class="flex flex-col gap-3 border-b border-blue-100 bg-blue-50/50 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6 dark:border-blue-900/40 dark:bg-blue-950/20">
                 <div class="flex min-w-0 items-center gap-3">
@@ -360,11 +408,79 @@
                         <p class="text-xs text-zinc-600 dark:text-zinc-400">{{ __('Lapisan analisis tambahan, terpisah dari Scheduling Engine deterministik.') }}</p>
                     </div>
                 </div>
-                <span class="inline-flex w-fit shrink-0 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">{{ __('Menunggu integrasi API') }}</span>
+                @if (($result['ai_summary']['status'] ?? '') === 'success')
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">{{ __('Gemini 3.5 Flash-Lite (Berhasil)') }}</span>
+                @elseif (($result['ai_summary']['status'] ?? '') === 'partial')
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300">{{ __('Analisis Sebagian (Partial)') }}</span>
+                @elseif (($result['ai_summary']['status'] ?? '') === 'fallback')
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300">{{ __('Mode Fallback Aktif') }}</span>
+                @elseif (($result['ai_summary']['status'] ?? '') === 'not_applicable')
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{{ __('Tidak Memerlukan AI') }}</span>
+                @else
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">{{ __('Menunggu Permintaan Admin') }}</span>
+                @endif
             </div>
-            <div class="space-y-3 p-5 sm:p-6">
-                <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ __('Belum ada analisis AI untuk pengajuan ini.') }}</p>
-                <p class="text-sm leading-6 text-zinc-600 dark:text-zinc-400">{{ __('Setelah integrasi backend selesai, admin dapat meminta Gemini menilai kandidat yang telah lolos pemeriksaan kompetensi, bentrok jadwal, dan ruangan. Hasil AI akan ditampilkan di sini bersama penjelasan alasannya.') }}</p>
+
+            <div class="space-y-4 p-5 sm:p-6">
+                @if (! empty($result['ai_summary']))
+                    <div class="space-y-2">
+                        <h4 class="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                            {{ ($result['ai_summary']['fallback_used'] ?? false) ? __('Ringkasan Sistem (Fallback):') : __('Ringkasan Eksekutif Gemini AI:') }}
+                        </h4>
+                        <p class="text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">
+                            {{ $result['ai_summary']['executive_summary'] }}
+                        </p>
+                    </div>
+
+                    @php
+                        $aiSchedules = collect($result['affected_schedules'] ?? [])
+                            ->filter(fn ($s) => ! empty($s['ai_recommendation']['rankings']) || ! empty($s['ai_recommendation']['summary_explanation']));
+                    @endphp
+
+                    @if ($aiSchedules->isNotEmpty())
+                        <div class="space-y-3 pt-2">
+                            <h4 class="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{{ __('Penjelasan & Peringkat Rekomendasi per Kelas:') }}</h4>
+                            <div class="grid gap-3 sm:grid-cols-2">
+                                @foreach ($aiSchedules as $sched)
+                                    <div class="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 text-xs dark:border-zinc-800 dark:bg-zinc-800/40" wire:key="ai-summary-card-{{ $sched['schedule_id'] }}">
+                                        <div class="flex items-center justify-between border-b border-zinc-200 pb-2 dark:border-zinc-700">
+                                            <span class="font-bold text-zinc-900 dark:text-white">{{ $sched['class_name'] }} ({{ $sched['subject'] }})</span>
+                                            <span class="text-[11px] text-zinc-500 dark:text-zinc-400">{{ substr($sched['start_time'], 0, 5) }} - {{ substr($sched['end_time'], 0, 5) }}</span>
+                                        </div>
+                                        <p class="mt-2 text-zinc-600 dark:text-zinc-300 leading-relaxed">
+                                            {{ $sched['ai_recommendation']['summary_explanation'] }}
+                                        </p>
+                                        @if (! empty($sched['ai_recommendation']['rankings']))
+                                            <div class="mt-3 space-y-1.5 border-t border-zinc-200/60 pt-2 dark:border-zinc-700/60">
+                                                @foreach ($sched['ai_recommendation']['rankings'] as $aiRank)
+                                                    <div class="flex items-start justify-between gap-2 text-[11px]">
+                                                        <span class="font-medium text-zinc-800 dark:text-zinc-200">
+                                                            #{{ $aiRank['rank'] }}. {{ $aiRank['instructor_name'] }}
+                                                            <span class="block text-zinc-500 dark:text-zinc-400 font-normal">{{ $aiRank['ai_reasoning'] }}</span>
+                                                        </span>
+                                                        @if (! is_null($aiRank['confidence_score']))
+                                                            <span class="shrink-0 font-semibold text-[#1565D8] dark:text-blue-400">
+                                                                {{ $aiRank['confidence_score'] }}%
+                                                            </span>
+                                                        @else
+                                                            <span class="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                                                {{ __('Deterministik') }}
+                                                            </span>
+                                                        @endif
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                        @endif
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                    @endif
+                @else
+                    <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{{ __('Belum ada analisis AI untuk pengajuan ini.') }}</p>
+                    <p class="text-sm leading-6 text-zinc-600 dark:text-zinc-400">{{ __('Klik tombol "Analisis dengan Gemini AI" di atas untuk meminta Gemini 3.5 Flash-Lite menilai kandidat yang telah lolos pemeriksaan kompetensi, bentrok jadwal, dan ruangan.') }}</p>
+                @endif
+
                 <div class="flex items-start gap-2 rounded-lg bg-zinc-50 p-3 text-xs leading-5 text-zinc-600 dark:bg-zinc-800/50 dark:text-zinc-300">
                     <flux:icon name="shield-check" class="mt-0.5 size-4 shrink-0 text-[#1565D8] dark:text-blue-300" />
                     <p>{{ __('Gemini hanya memberi rekomendasi, tidak mengubah jadwal otomatis. Jika API gagal, hasil Scheduling Engine tetap digunakan.') }}</p>

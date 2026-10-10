@@ -396,5 +396,134 @@ Cukup sematkan tag Livewire berikut di dalam kontainer halaman:
 
 ### Action yang Tersedia:
 * **`wire:submit="submitLeave"`** &rarr; Memvalidasi form, mencegah duplikasi, menyimpan izin dengan status `pending`, dan menjalankan `SchedulingEngine`.
+* **`wire:click="analyzeWithAi"`** &rarr; Meminta analisis lanjutan dan penjelasan mendalam menggunakan **Google Gemini 3.5 Flash-Lite** (hanya dijalankan saat admin meminta).
 * **`wire:click="resetForm"`** &rarr; Mengosongkan form input dan menghapus hasil evaluasi.
+
+---
+
+### Integrasi pada Halaman AI Auto-Scheduler (`App\Livewire\AiScheduler`):
+Pada halaman AI Auto-Scheduler (`resources/views/livewire/ai-scheduler.blade.php`), evaluasi deterministik dimuat sebagai hasil utama.
+* **`wire:click="runScheduler"`** / **`selectLeave(id)`** &rarr; Menjalankan evaluasi deterministik murni dan mereset status/analisis AI sebelumnya.
+* **`wire:click="analyzeWithAi"`** &rarr; Meminta analisis peringkat dan ringkasan eksekutif dari Gemini AI untuk izin yang sedang aktif.
+
+---
+
+## 9. Integrasi AI: Google Gemini 3.5 Flash-Lite
+
+Untuk memperkaya rekomendasi deterministik dengan penjelasan manusiawi yang mendalam dan skor keyakinan, sistem mengintegrasikan **Google Gemini 3.5 Flash-Lite**:
+* **Provider:** Google Gemini API (`https://generativelanguage.googleapis.com/v1beta`)
+* **Model ID:** `gemini-3.5-flash-lite` (Stable GA)
+* **Keamanan Kunci API:**
+  - Disimpan aman di `.env` (`GEMINI_API_KEY`), tidak di-commit ke Git.
+  - **Dikirim via HTTP Header `x-goog-api-key`**, bukan melalui URL query parameter.
+  - Exception dan log disanitasi agar tidak membocorkan data sensitif atau kredensial API.
+
+### Prinsip Utama & Aturan Validasi Ketat:
+1. **Penentu Kebenaran Mutlak:** `SchedulingEngine` deterministik lokal tetap menjadi satu-satunya otoritas penentu kelayakan instruktur (keahlian, bentrok jadwal, izin) dan ruangan.
+2. **Peran Gemini AI:** Hanya memeringkat dan menjelaskan kandidat yang **sudah dinyatakan valid** oleh Scheduling Engine. AI tidak pernah diberi akses untuk meloloskan kandidat yang didiskualifikasi.
+3. **Validasi Ketat Anti-Halusinasi:**
+   - **ID Kandidat:** Harus terdaftar dalam pool `validCandidates` dan wajib unik (tidak boleh duplikat).
+   - **Nama Instruktur:** Wajib diambil dari database/hasil deterministik, bukan dari teks keluaran AI.
+   - **Peringkat (Rank):** Tidak boleh ada ranking duplikat; dinormalisasi secara sekuensial (1, 2, ...).
+   - **Skor Keyakinan (Confidence Score):** Metrik khusus AI yang dibatasi ketat dalam rentang valid `0` hingga `100`. Pada mode fallback, nilai ini bernilai `null` dan tidak diisi oleh skor sistem deterministik (karena skor deterministik bisa > 100).
+4. **Pencegahan Konflik Lintas Kelas (Cross-Schedule Allocation):**
+   - Hasil peringkat AI diproses ulang melalui `resolveCrossScheduleAiConflicts` untuk memastikan tidak ada instruktur yang sama direkomendasikan pada dua kelas terdampak yang waktu pelaksanaannya beririsan/bersamaan.
+5. **Otorisasi & Keamanan Akses:**
+   - Action `analyzeWithAi()` dilindungi oleh otorisasi `Gate::authorize('analyze-with-ai')` sehingga hanya pengguna/admin terotentikasi yang berhak mengeksekusi analisis AI.
+6. **Mekanisme 4 Status Analisis Transparan:**
+   Sistem membedakan secara tegas 4 status hasil analisis pada `ai_summary.status`:
+   - `success`: Seluruh kelas yang memenuhi syarat berhasil dianalisis penuh oleh Gemini AI.
+   - `partial`: Sebagian kelas berhasil dianalisis AI, sebagian menggunakan fallback deterministik akibat kendala API.
+   - `fallback`: Seluruh kelas gagal dianalisis AI dan beralih ke rekomendasi deterministik sistem.
+   - `not_applicable`: Tidak ada kelas terdampak atau tidak ada kandidat pengganti yang memenuhi syarat.
+7. **Eksekusi Eksplisit (On-Demand):** Panggilan AI **tidak dijalankan otomatis saat submit**, melainkan hanya saat admin secara sadar menekan tombol *"Analisis dengan Gemini AI"* atau menambahkan opsi `--ai` pada CLI Artisan.
+
+### Struktur Data Tambahan Hasil AI pada Kontrak JSON:
+
+#### A. Saat Panggilan Gemini AI Berhasil:
+Pada setiap jadwal terdampak (`affected_schedules.*`):
+```json
+"ai_recommendation": {
+  "status": "success",
+  "is_ai_generated": true,
+  "model": "gemini-3.5-flash-lite",
+  "best_candidate_id": 2,
+  "summary_explanation": "Kanero sangat direkomendasikan karena memiliki kompetensi tingkat Advanced...",
+  "rankings": [
+    {
+      "instructor_id": 2,
+      "instructor_name": "Kanero",
+      "rank": 1,
+      "ai_reasoning": "Sangat menguasai materi Microsoft Excel dan memiliki beban mengajar ringan...",
+      "confidence_score": 96
+    }
+  ],
+  "fallback_used": false,
+  "fallback_reason": null
+}
+```
+
+Pada root hasil evaluasi (`ai_summary`):
+```json
+"ai_summary": {
+  "status": "success",
+  "is_ai_generated": true,
+  "model": "gemini-3.5-flash-lite",
+  "executive_summary": "Analisis Gemini AI (gemini-3.5-flash-lite): Seluruh 2 kelas terdampak berhasil dianalisis dan diperingkat berdasarkan kesesuaian keahlian serta beban mengajar...",
+  "fallback_used": false,
+  "fallback_reason": null,
+  "generated_at": "2026-10-10T08:25:00+07:00"
+}
+```
+
+#### B. Saat Terjadi Kegagalan API (Mode Fallback Digunakan):
+Pada setiap jadwal terdampak (`affected_schedules.*`):
+```json
+"ai_recommendation": {
+  "status": "fallback",
+  "is_ai_generated": false,
+  "model": "gemini-3.5-flash-lite",
+  "best_candidate_id": 2,
+  "summary_explanation": "Mode Fallback: Menggunakan rekomendasi deterministik sistem (Alasan: Layanan Gemini AI tidak dapat diakses (HTTP 503)).",
+  "rankings": [
+    {
+      "instructor_id": 2,
+      "instructor_name": "Kanero",
+      "rank": 1,
+      "ai_reasoning": "Memiliki kompetensi Microsoft Excel (Advanced); Beban mengajar 0 kelas hari ini",
+      "confidence_score": null
+    }
+  ],
+  "fallback_used": true,
+  "fallback_reason": "Layanan Gemini AI tidak dapat diakses (HTTP 503)."
+}
+```
+
+Pada root hasil evaluasi (`ai_summary`):
+```json
+"ai_summary": {
+  "status": "fallback",
+  "is_ai_generated": false,
+  "model": "gemini-3.5-flash-lite",
+  "executive_summary": "Mode Fallback Aktif: Analisis AI Gemini tidak tersedia (Layanan Gemini AI tidak dapat diakses (HTTP 503)). Rekomendasi dihitung menggunakan Scheduling Engine deterministik berbasis kompetensi dan ketersediaan.",
+  "fallback_used": true,
+  "fallback_reason": "Layanan Gemini AI tidak dapat diakses (HTTP 503).",
+  "generated_at": "2026-10-10T08:25:00+07:00"
+}
+```
+
+Eksekusi CLI dengan AI:
+```bash
+php artisan schedule:evaluate --ai
+```
+
+---
+
+### 8. Hak Akses & Otorisasi Penggunaan Gemini AI
+Aksi `analyzeWithAi()` dilindungi secara ketat oleh otorisasi `Gate::authorize('analyze-with-ai')`:
+- **Admin**: Diizinkan (`Response::allow()`). Menjalankan evaluasi AI Google Gemini 3.5 Flash-Lite.
+- **Pengguna Biasa (Non-Admin)**: Ditolak dengan HTTP 403 Forbidden (`Response::deny('Hanya pengguna dengan hak akses administrator yang dapat menjalankan analisis Gemini AI.')`).
+- **Pengguna Belum Login (Guest)**: Ditolak dengan HTTP 403 Forbidden.
+- **Proteksi API**: Penolakan otorisasi terjadi sebelum pemanggilan layer AI, sehingga request tidak berwenang dijamin tidak memicu panggilan HTTP ke endpoint Gemini API.
+- **Mekanisme Penentuan Admin Sementara (Interim RBAC)**: Menggunakan `$user->isAdmin()`, yang memvalidasi email terhadap konfigurasi `config('auth.admin_emails')` (default: `admin@palcomtech.ac.id`, `admin@example.com`), prefix email `admin@`, atau atribut `role === 'admin'` / `is_admin === true` jika tersedia di masa depan.
 
