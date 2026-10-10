@@ -209,7 +209,11 @@ class InstructorLeaveForm extends Component
 
         $this->schedulingResult = $enhancedResult->toArray();
 
-        $this->feedbackMessage = 'Rekomendasi berhasil dianalisis dan diperkaya dengan Google Gemini 3.5 Flash-Lite.';
+        if ($enhancedResult->aiSummary && ($enhancedResult->aiSummary['fallback_used'] ?? false)) {
+            $this->feedbackMessage = 'Layanan Gemini AI tidak dapat dijangkau. Rekomendasi tetap menggunakan hasil deterministik (Mode Fallback).';
+        } else {
+            $this->feedbackMessage = 'Rekomendasi berhasil dianalisis dan diperkaya dengan Google Gemini 3.5 Flash-Lite.';
+        }
 
         return $this->schedulingResult;
     }

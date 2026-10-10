@@ -108,10 +108,14 @@ class GeminiSchedulingAdvisor
         $prompt = $this->buildPromptForSchedule($eval);
 
         try {
-            $endpoint = "{$this->baseUrl}/models/{$this->model}:generateContent?key={$this->apiKey}";
+            // Keamanan: Kirim API key melalui header x-goog-api-key, bukan di URL query parameter
+            $endpoint = "{$this->baseUrl}/models/{$this->model}:generateContent";
 
             $response = Http::timeout(15)
-                ->withHeaders(['Content-Type' => 'application/json'])
+                ->withHeaders([
+                    'Content-Type' => 'application/json',
+                    'x-goog-api-key' => $this->apiKey,
+                ])
                 ->post($endpoint, [
                     'contents' => [
                         [
@@ -127,12 +131,12 @@ class GeminiSchedulingAdvisor
                 ]);
 
             if ($response->failed()) {
+                // Keamanan: Hanya catat status HTTP, jangan catat body atau kredensial sensitif
                 Log::warning('Gemini API call failed', [
                     'status' => $response->status(),
-                    'body' => $response->body(),
                 ]);
 
-                return $this->buildFallbackData($eval, "HTTP {$response->status()}: Gagal menghubungi Gemini API.");
+                return $this->buildFallbackData($eval, "Layanan Gemini AI tidak dapat diakses (HTTP {$response->status()}).");
             }
 
             $json = $response->json();
@@ -143,46 +147,105 @@ class GeminiSchedulingAdvisor
             }
 
             $parsed = json_decode($rawText, true);
-            if (! is_array($parsed) || empty($parsed['rankings'])) {
+            $rawRankings = $parsed['rankings'] ?? null;
+            if (! is_array($parsed) || ! is_array($rawRankings) || empty($rawRankings)) {
                 return $this->buildFallbackData($eval, 'Format JSON respons AI tidak sesuai skema.');
             }
 
-            // Validasi ketat: Hanya izinkan instruktur yang memang ada dalam validCandidates
-            $validCandidateIds = collect($eval->validCandidates)->pluck('instructorId')->all();
+            // Validasi ketat:
+            // 1. ID kandidat harus ada di dalam validCandidates deterministik
+            // 2. ID kandidat harus unik (tidak boleh duplikat)
+            // 3. Nama HARUS diambil dari database/deterministik, BUKAN dari teks buatan AI
+            // 4. Skor keyakinan harus dalam rentang [0, 100]
+            // 5. Ranking tidak boleh duplikat (dinormalisasi secara sekuensial)
+            $validCandidatesById = collect($eval->validCandidates)->keyBy('instructorId');
             $sanitizedRankings = [];
+            $seenCandidateIds = [];
 
-            foreach ($parsed['rankings'] as $item) {
-                $candId = (int) ($item['instructor_id'] ?? 0);
-                if (in_array($candId, $validCandidateIds, true)) {
-                    $sanitizedRankings[] = [
-                        'instructor_id' => $candId,
-                        'instructor_name' => (string) ($item['instructor_name'] ?? ''),
-                        'rank' => (int) ($item['rank'] ?? (count($sanitizedRankings) + 1)),
-                        'ai_reasoning' => (string) ($item['ai_reasoning'] ?? ''),
-                        'confidence_score' => (int) ($item['confidence_score'] ?? 80),
-                    ];
+            foreach ($rawRankings as $item) {
+                if (! is_array($item)) {
+                    continue;
                 }
+
+                $candId = (int) ($item['instructor_id'] ?? 0);
+
+                // 1. Validasi ID kandidat
+                if (! $validCandidatesById->has($candId)) {
+                    continue;
+                }
+
+                // 2. Cegah duplikasi ID kandidat
+                if (isset($seenCandidateIds[$candId])) {
+                    continue;
+                }
+                $seenCandidateIds[$candId] = true;
+
+                // 3. Ambil nama resmi dari database / hasil deterministik
+                $matchedCandidate = $validCandidatesById->get($candId);
+                $officialName = $matchedCandidate->instructorName;
+
+                // 4. Validasi rentang skor keyakinan [0, 100]
+                $rawScore = $item['confidence_score'] ?? 80;
+                $confidenceScore = is_numeric($rawScore) ? max(0, min(100, (int) $rawScore)) : 80;
+
+                // Rank awal dari respon AI
+                $rawRank = isset($item['rank']) && is_numeric($item['rank']) ? (int) $item['rank'] : PHP_INT_MAX;
+
+                $reasoning = trim((string) ($item['ai_reasoning'] ?? ''));
+                if ($reasoning === '') {
+                    $reasoning = 'Direkomendasikan berdasarkan evaluasi kompetensi dan ketersediaan waktu.';
+                }
+
+                $sanitizedRankings[] = [
+                    'instructor_id' => $candId,
+                    'instructor_name' => $officialName,
+                    'raw_rank' => $rawRank,
+                    'ai_reasoning' => $reasoning,
+                    'confidence_score' => $confidenceScore,
+                ];
             }
 
             if (empty($sanitizedRankings)) {
                 return $this->buildFallbackData($eval, 'Kandidat dalam respons AI tidak cocok dengan kandidat valid.');
             }
 
-            // Urutkan berdasarkan rank terkecil (rank 1 pertama)
-            usort($sanitizedRankings, fn ($a, $b) => $a['rank'] <=> $b['rank']);
+            // 5. Ranking tidak boleh duplikat: urutkan berdasarkan raw_rank ascending, jika sama urutkan berdasarkan confidence_score descending
+            usort($sanitizedRankings, function ($a, $b) {
+                if ($a['raw_rank'] === $b['raw_rank']) {
+                    return $b['confidence_score'] <=> $a['confidence_score'];
+                }
+
+                return $a['raw_rank'] <=> $b['raw_rank'];
+            });
+
+            // Normalisasikan ranking menjadi urutan sekuensial unik 1, 2, ...
+            $finalRankings = [];
+            foreach ($sanitizedRankings as $index => $ranked) {
+                $finalRankings[] = [
+                    'instructor_id' => $ranked['instructor_id'],
+                    'instructor_name' => $ranked['instructor_name'],
+                    'rank' => $index + 1,
+                    'ai_reasoning' => $ranked['ai_reasoning'],
+                    'confidence_score' => $ranked['confidence_score'],
+                ];
+            }
 
             return [
                 'is_ai_generated' => true,
                 'model' => $this->model,
-                'best_candidate_id' => $sanitizedRankings[0]['instructor_id'],
+                'best_candidate_id' => $finalRankings[0]['instructor_id'],
                 'summary_explanation' => (string) ($parsed['summary_explanation'] ?? 'Rekomendasi dianalisis oleh Gemini AI.'),
-                'rankings' => $sanitizedRankings,
+                'rankings' => $finalRankings,
                 'fallback_used' => false,
+                'fallback_reason' => null,
             ];
         } catch (Throwable $e) {
-            Log::error('Exception during Gemini API evaluation', ['exception' => $e->getMessage()]);
+            // Keamanan: Jangan catat raw message atau detail sensitif ke log maupun UI
+            Log::error('Exception during Gemini API evaluation', [
+                'exception_class' => get_class($e),
+            ]);
 
-            return $this->buildFallbackData($eval, 'Terjadi kendala koneksi ke Gemini API: '.$e->getMessage());
+            return $this->buildFallbackData($eval, 'Kendala koneksi jaringan ke layanan AI.');
         }
     }
 
@@ -258,7 +321,7 @@ PROMPT;
             'is_ai_generated' => false,
             'model' => $this->model,
             'best_candidate_id' => $eval->bestCandidate?->instructorId,
-            'summary_explanation' => "Menggunakan rekomendasi sistem deterministik ({$reason}).",
+            'summary_explanation' => "Mode Fallback: Menggunakan rekomendasi deterministik sistem (Alasan: {$reason}).",
             'rankings' => $fallbackRankings,
             'fallback_used' => true,
             'fallback_reason' => $reason,
@@ -275,20 +338,52 @@ PROMPT;
     {
         $total = count($enhancedSchedules);
         $resolved = count(array_filter($enhancedSchedules, fn ($s) => $s->isResolved()));
-        $hasAi = collect($enhancedSchedules)->contains(fn ($s) => ($s->aiRecommendation['is_ai_generated'] ?? false) === true);
+        $aiGeneratedCount = collect($enhancedSchedules)->filter(fn ($s) => ($s->aiRecommendation['is_ai_generated'] ?? false) === true)->count();
+        $fallbackCount = collect($enhancedSchedules)->filter(fn ($s) => ($s->aiRecommendation['fallback_used'] ?? false) === true)->count();
 
         if ($total === 0) {
-            $text = 'Tidak ada jadwal mengajar yang terdampak pada periode izin ini. Tidak diperlukan tindakan penggantian instruktur.';
-        } elseif ($resolved === $total) {
-            $text = "Seluruh {$total} kelas terdampak berhasil dicarikan rekomendasi instruktur pengganti yang kompeten dan bebas bentrok jadwal/ruangan. Rekomendasi siap ditinjau dan disetujui oleh admin.";
+            return [
+                'is_ai_generated' => false,
+                'model' => $this->model,
+                'executive_summary' => 'Tidak ada jadwal mengajar yang terdampak pada periode izin ini. Tidak diperlukan tindakan penggantian instruktur.',
+                'fallback_used' => false,
+                'fallback_reason' => null,
+                'generated_at' => now()->toIso8601String(),
+            ];
+        }
+
+        // Jika API gagal atau seluruh jadwal menggunakan fallback
+        if ($aiGeneratedCount === 0 && $fallbackCount > 0) {
+            $reasons = collect($enhancedSchedules)
+                ->pluck('aiRecommendation.fallback_reason')
+                ->filter()
+                ->unique()
+                ->implode('; ');
+            $reasonText = $reasons ?: 'Layanan AI tidak dapat diakses';
+
+            return [
+                'is_ai_generated' => false,
+                'model' => $this->model,
+                'executive_summary' => "Mode Fallback Aktif: Analisis AI Gemini tidak tersedia ({$reasonText}). Rekomendasi dihitung menggunakan Scheduling Engine deterministik berbasis kompetensi dan ketersediaan.",
+                'fallback_used' => true,
+                'fallback_reason' => $reasonText,
+                'generated_at' => now()->toIso8601String(),
+            ];
+        }
+
+        // Jika rekomendasi berhasil dihasilkan oleh Gemini AI
+        if ($resolved === $total) {
+            $text = "Analisis Gemini AI ({$this->model}): Seluruh {$total} kelas terdampak berhasil dicarikan rekomendasi instruktur pengganti yang kompeten dan bebas bentrok jadwal/ruangan. Rekomendasi siap ditinjau dan disetujui oleh admin.";
         } else {
-            $text = "Ditemukan {$total} kelas terdampak, {$resolved} kelas berhasil dicarikan solusi, dan ".($total - $resolved).' kelas memerlukan penyesuaian khusus (ketiadaan kandidat atau kendala ruangan).';
+            $text = "Analisis Gemini AI ({$this->model}): Ditemukan {$total} kelas terdampak, {$resolved} kelas berhasil dicarikan solusi pengganti, dan ".($total - $resolved).' kelas memerlukan penyesuaian khusus oleh admin.';
         }
 
         return [
-            'is_ai_generated' => $hasAi,
+            'is_ai_generated' => true,
             'model' => $this->model,
             'executive_summary' => $text,
+            'fallback_used' => false,
+            'fallback_reason' => null,
             'generated_at' => now()->toIso8601String(),
         ];
     }
