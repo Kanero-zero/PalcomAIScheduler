@@ -815,8 +815,11 @@ Schema::create('activity_logs', function (Blueprint $table) {
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `leave` | Pengajuan Izin | `pending` | Menunggu | User Name / Admin | `Pengajuan Izin #{id}` | Pengajuan izin instruktur dicatat |
 | `engine` | Scheduling Engine | `success` | Selesai | `Sistem` | `Pengajuan Izin #{id}` | Kandidat pengganti ditemukan / evaluasi selesai |
-| `ai` | Analisis AI | `success` / `fallback` | Selesai / Fallback | `Gemini AI` | `Pengajuan Izin #{id}` | Rekomendasi instruktur dianalisis oleh AI |
-| `approval` | Persetujuan | `success` / `rejected` | Disetujui / Ditolak | Admin Name | `Pengajuan Izin #{id}` | Rekomendasi instruktur disetujui / Usulan ditolak |
+| `ai` | Analisis AI | `success` | Selesai | `Gemini AI` | `Pengajuan Izin #{id}` | Rekomendasi instruktur dianalisis oleh AI |
+| `ai` | Analisis AI | `fallback` | Mode Fallback | `Gemini AI` | `Pengajuan Izin #{id}` | Analisis AI dialihkan ke Fallback |
+| `ai` | Analisis AI | `not_applicable` | Tidak Diperlukan | `Gemini AI` | `Pengajuan Izin #{id}` | Analisis AI tidak diperlukan |
+| `approval` | Persetujuan | `success` | Disetujui | Admin Name | `Pengajuan Izin #{id}` | Rekomendasi instruktur disetujui |
+| `approval` | Persetujuan | `rejected` | Ditolak | Admin Name | `Pengajuan Izin #{id}` | Usulan pengganti ditolak |
 | `schedule` | Jadwal | `success` | Berhasil | `Sistem` / Admin Name | `{Class Name} - {Room}` | Jadwal kelas diperbarui |
 
 ---
@@ -829,19 +832,19 @@ Method pada model `ActivityLog::toTimelineArray()` menghasilkan format yang pers
 [
     'id' => 12,
     'at' => '10 Okt 2026, 11.45 WIB',
-    'type' => 'approval',
-    'type_label' => 'Persetujuan',
-    'state' => 'success',
-    'state_label' => 'Disetujui',
-    'actor' => 'Admin BAAK PalComTech',
-    'title' => 'Rekomendasi instruktur disetujui',
-    'description' => 'Admin menyetujui Wahyu sebagai instruktur pengganti untuk sesi terdampak.',
+    'type' => 'ai',
+    'type_label' => 'Analisis AI',
+    'state' => 'fallback', // 'success', 'fallback', 'not_applicable', 'pending', 'rejected'
+    'state_label' => 'Mode Fallback',
+    'actor' => 'Gemini AI',
+    'title' => 'Analisis AI dialihkan ke Fallback',
+    'description' => 'Layanan Gemini AI tidak dapat dijangkau. Rekomendasi mengandalkan hasil deterministik.',
     'subject' => 'Pengajuan Izin #1',
     'metadata' => [
         'leave_id' => 1,
-        'schedule_id' => 3,
-        'replacement_instructor_id' => 2,
-        'original_instructor_id' => 1,
+        'ai_status' => 'fallback',
+        'confidence_score' => 0.65,
+        'fallback_used' => true,
     ],
 ]
 ```
@@ -852,12 +855,15 @@ Method pada model `ActivityLog::toTimelineArray()` menghasilkan format yang pers
 
 1. **Evaluasi Engine:**
    - Karena halaman `AiScheduler` dan `ApprovalReview` menjalankan evaluasi setiap kali dibuka (`mount()`, `selectLeave()`), evaluasi engine menggunakan hash `fingerprint`:
-     `sha1("engine:{$leaveId}:{$totalAffected}:{$totalResolved}:" . implode(',', $scheduleIds))`
-   - Log engine tidak akan diduplikasi jika fingerprint identik sudah dicatat dalam kurun waktu 1 jam terakhir, kecuali status evaluasi mengalami perubahan nyata.
+     `sha1("engine:{$leaveId}:affected:{$totalAffected}:resolved:{$totalResolved}:snapshots:" . implode('|', $scheduleSnapshots))`
+   - **Aturan Permanen:** Log engine untuk pengajuan izin yang sama HANYA dibuat ketika:
+     - Belum pernah dicatat sebelumnya untuk pengajuan izin tersebut, ATAU
+     - Hasil evaluasi mengalami perubahan bermakna (fingerprint berbeda dari log evaluasi terakhir pada izin terkait).
+   - Pengguna yang membuka atau me-refresh halaman berulang kali dengan kondisi yang sama TIDAK akan menghasilkan log baru (tidak ada batas waktu 1 jam).
 2. **Analisis AI:**
-   - Hanya dicatat ketika action `analyzeWithAi()` dipicu secara eksplisit oleh admin.
+   - Dicatat per pemanggilan eksplisit action `analyzeWithAi()` oleh admin, merekam status nyata (`success`, `fallback`, atau `not_applicable`).
 3. **Persetujuan & Penolakan:**
-   - Dicatat satu kali per eksekusi keputusan pada jadwal kelas terkait.
+   - Dicatat tepat satu kali per transaksi persetujuan/penolakan jadwal yang berhasil.
 
 ---
 
@@ -866,6 +872,6 @@ Method pada model `ActivityLog::toTimelineArray()` menghasilkan format yang pers
 1. **Atomisitas Transaksi:**
    - Log untuk `approval` dan `schedule` dicatat di dalam blok `DB::transaction()` pada `ScheduleApprovalService`. Jika validasi gagal atau rollback terjadi, entri log otomatis ikut ter-rollback.
 2. **Zero Leakage:**
-   - Metadata JSON dilarang menyimpan API Key, token otentikasi, atau password hash.
+   - Metadata JSON dilarang keras menyimpan API Key, token otentikasi, atau password hash.
 
 

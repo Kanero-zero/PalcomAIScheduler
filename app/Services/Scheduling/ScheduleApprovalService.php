@@ -6,6 +6,7 @@ use App\Models\Instructor;
 use App\Models\InstructorLeave;
 use App\Models\Schedule;
 use App\Models\ScheduleSubstitution;
+use App\Services\ActivityLog\ActivityLogService;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -164,6 +165,11 @@ class ScheduleApprovalService
                     'instructor_id' => $replacementInstructor->id,
                 ]);
 
+                // Catat aktivitas persetujuan dan perubahan jadwal secara atomik di dalam transaksi
+                $activityLogService = app(ActivityLogService::class);
+                $activityLogService->logApproval($substitution, $schedule, $user);
+                $activityLogService->logScheduleUpdated($schedule, $replacementInstructor, $user, $leave->id);
+
                 return [
                     'success' => true,
                     'message' => 'Instruktur pengganti berhasil disetujui dan jadwal kelas telah diperbarui.',
@@ -270,6 +276,9 @@ class ScheduleApprovalService
                         'notes' => null,
                     ]
                 );
+
+                // Catat aktivitas penolakan secara atomik di dalam transaksi
+                app(ActivityLogService::class)->logRejection($substitution, $schedule, $trimmedReason, $user);
 
                 return [
                     'success' => true,

@@ -82,4 +82,14 @@ class Schedule extends Model
     {
         return $this->hasMany(ScheduleSubstitution::class, 'schedule_id');
     }
+
+    /**
+     * Riwayat log aktivitas yang terkait dengan jadwal ini.
+     *
+     * @return HasMany<ActivityLog, $this>
+     */
+    public function activityLogs(): HasMany
+    {
+        return $this->hasMany(ActivityLog::class, 'schedule_id');
+    }
 }
