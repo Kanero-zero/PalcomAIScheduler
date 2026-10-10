@@ -129,11 +129,11 @@
 
             {{-- Ringkasan Eksekutif AI (Jika Sudah Dianalisis) --}}
             @if (! empty($schedulingResult['ai_summary']['executive_summary']))
-                <div class="mb-4 rounded-xl border border-cyan-200 bg-cyan-50/60 p-4 dark:border-cyan-900/50 dark:bg-cyan-950/30">
+                <div class="mb-4 rounded-xl border {{ ($schedulingResult['ai_summary']['fallback_used'] ?? false) ? 'border-amber-200 bg-amber-50/70 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200' : 'border-cyan-200 bg-cyan-50/60 text-cyan-900 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-200' }} p-4">
                     <div class="flex items-start gap-2.5">
-                        <flux:icon name="information-circle" class="size-4 shrink-0 mt-0.5 text-cyan-700 dark:text-cyan-400" />
-                        <div class="text-xs text-cyan-900 dark:text-cyan-200">
-                            <span class="font-bold">{{ __('Ringkasan Eksekutif (Gemini AI):') }}</span>
+                        <flux:icon name="{{ ($schedulingResult['ai_summary']['fallback_used'] ?? false) ? 'exclamation-circle' : 'information-circle' }}" class="size-4 shrink-0 mt-0.5 {{ ($schedulingResult['ai_summary']['fallback_used'] ?? false) ? 'text-amber-700 dark:text-amber-400' : 'text-cyan-700 dark:text-cyan-400' }}" />
+                        <div class="text-xs">
+                            <span class="font-bold">{{ ($schedulingResult['ai_summary']['fallback_used'] ?? false) ? __('Ringkasan Sistem (Fallback):') : __('Ringkasan Eksekutif (Gemini AI):') }}</span>
                             <p class="mt-1 leading-relaxed">{{ $schedulingResult['ai_summary']['executive_summary'] }}</p>
                         </div>
                     </div>
@@ -223,9 +223,13 @@
                                                 {{ __('Penjelasan Gemini 3.5 Flash-Lite') }}
                                             </span>
                                         </div>
-                                        @if ($sched['ai_recommendation']['fallback_used'] ?? false)
-                                            <span class="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                                        @if (($sched['ai_recommendation']['status'] ?? '') === 'fallback')
+                                            <span class="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-800 dark:bg-rose-900/60 dark:text-rose-200">
                                                 {{ __('Mode Fallback') }}
+                                            </span>
+                                        @elseif (($sched['ai_recommendation']['status'] ?? '') === 'not_applicable')
+                                            <span class="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                                {{ __('N/A') }}
                                             </span>
                                         @else
                                             <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
@@ -245,9 +249,15 @@
                                                         #{{ $aiRank['rank'] }}. {{ $aiRank['instructor_name'] }}:
                                                         <span class="font-normal text-zinc-600 dark:text-zinc-400">{{ $aiRank['ai_reasoning'] }}</span>
                                                     </span>
-                                                    <span class="shrink-0 font-semibold text-indigo-700 dark:text-indigo-300">
-                                                        {{ $aiRank['confidence_score'] }}%
-                                                    </span>
+                                                    @if (! is_null($aiRank['confidence_score']))
+                                                        <span class="shrink-0 font-semibold text-indigo-700 dark:text-indigo-300">
+                                                            {{ $aiRank['confidence_score'] }}%
+                                                        </span>
+                                                    @else
+                                                        <span class="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                                            {{ __('Deterministik') }}
+                                                        </span>
+                                                    @endif
                                                 </div>
                                             @endforeach
                                         </div>

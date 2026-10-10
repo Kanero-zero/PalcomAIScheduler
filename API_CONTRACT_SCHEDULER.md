@@ -425,11 +425,18 @@ Untuk memperkaya rekomendasi deterministik dengan penjelasan manusiawi yang mend
    - **ID Kandidat:** Harus terdaftar dalam pool `validCandidates` dan wajib unik (tidak boleh duplikat).
    - **Nama Instruktur:** Wajib diambil dari database/hasil deterministik, bukan dari teks keluaran AI.
    - **Peringkat (Rank):** Tidak boleh ada ranking duplikat; dinormalisasi secara sekuensial (1, 2, ...).
-   - **Skor Keyakinan (Confidence Score):** Dibatasi ketat dalam rentang valid `0` hingga `100`.
-4. **Mekanisme Fallback Eksplisit & Transparan:**
-   - Jika kuota habis, koneksi terputus, atau API gagal, sistem otomatis beralih ke rekomendasi deterministik (`fallback_used: true`).
-   - Sistem membedakan secara tegas ringkasan AI asli dengan ringkasan mode fallback di UI dan feedback pengguna.
-5. **Eksekusi Eksplisit (On-Demand):** Panggilan AI **tidak dijalankan otomatis saat submit**, melainkan hanya saat admin secara sadar menekan tombol *"Analisis dengan Gemini AI"* atau menambahkan opsi `--ai` pada CLI Artisan.
+   - **Skor Keyakinan (Confidence Score):** Metrik khusus AI yang dibatasi ketat dalam rentang valid `0` hingga `100`. Pada mode fallback, nilai ini bernilai `null` dan tidak diisi oleh skor sistem deterministik (karena skor deterministik bisa > 100).
+4. **Pencegahan Konflik Lintas Kelas (Cross-Schedule Allocation):**
+   - Hasil peringkat AI diproses ulang melalui `resolveCrossScheduleAiConflicts` untuk memastikan tidak ada instruktur yang sama direkomendasikan pada dua kelas terdampak yang waktu pelaksanaannya beririsan/bersamaan.
+5. **Otorisasi & Keamanan Akses:**
+   - Action `analyzeWithAi()` dilindungi oleh otorisasi `Gate::authorize('analyze-with-ai')` sehingga hanya pengguna/admin terotentikasi yang berhak mengeksekusi analisis AI.
+6. **Mekanisme 4 Status Analisis Transparan:**
+   Sistem membedakan secara tegas 4 status hasil analisis pada `ai_summary.status`:
+   - `success`: Seluruh kelas yang memenuhi syarat berhasil dianalisis penuh oleh Gemini AI.
+   - `partial`: Sebagian kelas berhasil dianalisis AI, sebagian menggunakan fallback deterministik akibat kendala API.
+   - `fallback`: Seluruh kelas gagal dianalisis AI dan beralih ke rekomendasi deterministik sistem.
+   - `not_applicable`: Tidak ada kelas terdampak atau tidak ada kandidat pengganti yang memenuhi syarat.
+7. **Eksekusi Eksplisit (On-Demand):** Panggilan AI **tidak dijalankan otomatis saat submit**, melainkan hanya saat admin secara sadar menekan tombol *"Analisis dengan Gemini AI"* atau menambahkan opsi `--ai` pada CLI Artisan.
 
 ### Struktur Data Tambahan Hasil AI pada Kontrak JSON:
 
@@ -437,6 +444,7 @@ Untuk memperkaya rekomendasi deterministik dengan penjelasan manusiawi yang mend
 Pada setiap jadwal terdampak (`affected_schedules.*`):
 ```json
 "ai_recommendation": {
+  "status": "success",
   "is_ai_generated": true,
   "model": "gemini-3.5-flash-lite",
   "best_candidate_id": 2,
@@ -458,9 +466,10 @@ Pada setiap jadwal terdampak (`affected_schedules.*`):
 Pada root hasil evaluasi (`ai_summary`):
 ```json
 "ai_summary": {
+  "status": "success",
   "is_ai_generated": true,
   "model": "gemini-3.5-flash-lite",
-  "executive_summary": "Analisis Gemini AI (gemini-3.5-flash-lite): Seluruh 2 kelas terdampak berhasil dicarikan rekomendasi instruktur pengganti...",
+  "executive_summary": "Analisis Gemini AI (gemini-3.5-flash-lite): Seluruh 2 kelas terdampak berhasil dianalisis dan diperingkat berdasarkan kesesuaian keahlian serta beban mengajar...",
   "fallback_used": false,
   "fallback_reason": null,
   "generated_at": "2026-10-10T08:25:00+07:00"
@@ -471,6 +480,7 @@ Pada root hasil evaluasi (`ai_summary`):
 Pada setiap jadwal terdampak (`affected_schedules.*`):
 ```json
 "ai_recommendation": {
+  "status": "fallback",
   "is_ai_generated": false,
   "model": "gemini-3.5-flash-lite",
   "best_candidate_id": 2,
@@ -481,7 +491,7 @@ Pada setiap jadwal terdampak (`affected_schedules.*`):
       "instructor_name": "Kanero",
       "rank": 1,
       "ai_reasoning": "Memiliki kompetensi Microsoft Excel (Advanced); Beban mengajar 0 kelas hari ini",
-      "confidence_score": 95
+      "confidence_score": null
     }
   ],
   "fallback_used": true,
@@ -492,6 +502,7 @@ Pada setiap jadwal terdampak (`affected_schedules.*`):
 Pada root hasil evaluasi (`ai_summary`):
 ```json
 "ai_summary": {
+  "status": "fallback",
   "is_ai_generated": false,
   "model": "gemini-3.5-flash-lite",
   "executive_summary": "Mode Fallback Aktif: Analisis AI Gemini tidak tersedia (Layanan Gemini AI tidak dapat diakses (HTTP 503)). Rekomendasi dihitung menggunakan Scheduling Engine deterministik berbasis kompetensi dan ketersediaan.",

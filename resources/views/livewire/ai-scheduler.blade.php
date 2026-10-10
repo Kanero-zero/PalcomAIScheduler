@@ -238,12 +238,16 @@
                                             {{ __('Penjelasan Gemini 3.5 Flash-Lite') }}
                                         </span>
                                     </div>
-                                    @if ($schedule['ai_recommendation']['fallback_used'] ?? false)
-                                        <span class="rounded bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                                    @if (($schedule['ai_recommendation']['status'] ?? '') === 'fallback')
+                                        <span class="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-800 dark:bg-rose-900/60 dark:text-rose-200">
                                             {{ __('Mode Fallback') }}
                                         </span>
+                                    @elseif (($schedule['ai_recommendation']['status'] ?? '') === 'not_applicable')
+                                        <span class="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                            {{ __('N/A') }}
+                                        </span>
                                     @else
-                                        <span class="rounded bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
+                                        <span class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
                                             {{ __('AI Active') }}
                                         </span>
                                     @endif
@@ -404,10 +408,14 @@
                         <p class="text-xs text-zinc-600 dark:text-zinc-400">{{ __('Lapisan analisis tambahan, terpisah dari Scheduling Engine deterministik.') }}</p>
                     </div>
                 </div>
-                @if (! empty($result['ai_summary']['fallback_used']))
-                    <span class="inline-flex w-fit shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300">{{ __('Mode Fallback Aktif') }}</span>
-                @elseif (! empty($result['ai_summary']['is_ai_generated']))
-                    <span class="inline-flex w-fit shrink-0 rounded-full border border-blue-300 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-300">{{ __('Gemini 3.5 Flash-Lite') }}</span>
+                @if (($result['ai_summary']['status'] ?? '') === 'success')
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">{{ __('Gemini 3.5 Flash-Lite (Berhasil)') }}</span>
+                @elseif (($result['ai_summary']['status'] ?? '') === 'partial')
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-300">{{ __('Analisis Sebagian (Partial)') }}</span>
+                @elseif (($result['ai_summary']['status'] ?? '') === 'fallback')
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-rose-300 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-300">{{ __('Mode Fallback Aktif') }}</span>
+                @elseif (($result['ai_summary']['status'] ?? '') === 'not_applicable')
+                    <span class="inline-flex w-fit shrink-0 rounded-full border border-zinc-200 bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">{{ __('Tidak Memerlukan AI') }}</span>
                 @else
                     <span class="inline-flex w-fit shrink-0 rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">{{ __('Menunggu Permintaan Admin') }}</span>
                 @endif
@@ -450,9 +458,15 @@
                                                             #{{ $aiRank['rank'] }}. {{ $aiRank['instructor_name'] }}
                                                             <span class="block text-zinc-500 dark:text-zinc-400 font-normal">{{ $aiRank['ai_reasoning'] }}</span>
                                                         </span>
-                                                        <span class="shrink-0 font-semibold text-[#1565D8] dark:text-blue-400">
-                                                            {{ $aiRank['confidence_score'] }}%
-                                                        </span>
+                                                        @if (! is_null($aiRank['confidence_score']))
+                                                            <span class="shrink-0 font-semibold text-[#1565D8] dark:text-blue-400">
+                                                                {{ $aiRank['confidence_score'] }}%
+                                                            </span>
+                                                        @else
+                                                            <span class="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">
+                                                                {{ __('Deterministik') }}
+                                                            </span>
+                                                        @endif
                                                     </div>
                                                 @endforeach
                                             </div>

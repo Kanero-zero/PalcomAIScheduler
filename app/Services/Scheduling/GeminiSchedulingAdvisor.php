@@ -51,6 +51,9 @@ class GeminiSchedulingAdvisor
             $enhancedSchedules[] = $this->enhanceScheduleEvaluation($scheduleEval);
         }
 
+        // Pastikan hasil ranking Gemini tidak menyebabkan rekomendasi instruktur yang sama untuk kelas beririsan
+        $enhancedSchedules = $this->resolveCrossScheduleAiConflicts($enhancedSchedules);
+
         // Generate executive summary from AI if there are affected schedules
         $aiSummary = $this->generateExecutiveSummary($result, $enhancedSchedules);
 
@@ -79,11 +82,14 @@ class GeminiSchedulingAdvisor
         // Rule: Only rank and explain when there are valid candidates
         if (empty($eval->validCandidates)) {
             $aiData = [
+                'status' => 'not_applicable',
                 'is_ai_generated' => false,
                 'model' => $this->model,
+                'best_candidate_id' => null,
                 'summary_explanation' => 'Tidak ada kandidat pengganti yang memenuhi syarat untuk dianalisis oleh AI.',
                 'rankings' => [],
                 'fallback_used' => false,
+                'fallback_reason' => null,
             ];
 
             return $this->rebuildScheduleEvaluation($eval, $aiData);
@@ -231,6 +237,7 @@ class GeminiSchedulingAdvisor
             }
 
             return [
+                'status' => 'success',
                 'is_ai_generated' => true,
                 'model' => $this->model,
                 'best_candidate_id' => $finalRankings[0]['instructor_id'],
@@ -247,6 +254,83 @@ class GeminiSchedulingAdvisor
 
             return $this->buildFallbackData($eval, 'Kendala koneksi jaringan ke layanan AI.');
         }
+    }
+
+    /**
+     * Resolve cross-schedule instructor assignment conflicts across overlapping classes.
+     * Ensures the same instructor is not recommended for two classes with overlapping time windows.
+     *
+     * @param  list<ScheduleEvaluation>  $enhancedSchedules
+     * @return list<ScheduleEvaluation>
+     */
+    public function resolveCrossScheduleAiConflicts(array $enhancedSchedules): array
+    {
+        /** @var list<array{instructor_id: int, start_time: string, end_time: string, class_name: string}> $allocatedInstructors */
+        $allocatedInstructors = [];
+
+        foreach ($enhancedSchedules as $index => $eval) {
+            if (empty($eval->aiRecommendation) || empty($eval->aiRecommendation['rankings'])) {
+                continue;
+            }
+
+            $rankings = $eval->aiRecommendation['rankings'];
+            $selectedCandidateId = null;
+            $selectedRankItem = null;
+            $conflictingClass = null;
+
+            // Cari kandidat dengan peringkat tertinggi yang tidak bentrok waktu dengan kelas yang sudah dialokasikan
+            foreach ($rankings as $rankItem) {
+                $candId = (int) $rankItem['instructor_id'];
+                $hasOverlap = false;
+
+                foreach ($allocatedInstructors as $alloc) {
+                    if ($alloc['instructor_id'] === $candId && $this->intervalsOverlap($alloc['start_time'], $alloc['end_time'], $eval->startTime, $eval->endTime)) {
+                        $hasOverlap = true;
+                        $conflictingClass = $alloc['class_name'];
+                        break;
+                    }
+                }
+
+                if (! $hasOverlap) {
+                    $selectedCandidateId = $candId;
+                    $selectedRankItem = $rankItem;
+                    break;
+                }
+            }
+
+            $aiData = $eval->aiRecommendation;
+
+            if ($selectedCandidateId !== null) {
+                $allocatedInstructors[] = [
+                    'instructor_id' => $selectedCandidateId,
+                    'start_time' => $eval->startTime,
+                    'end_time' => $eval->endTime,
+                    'class_name' => $eval->className,
+                ];
+
+                // Jika kandidat peringkat teratas bentrok dan dialihkan ke peringkat berikutnya
+                if ($selectedCandidateId !== ($aiData['best_candidate_id'] ?? null)) {
+                    $aiData['best_candidate_id'] = $selectedCandidateId;
+                    $aiData['summary_explanation'] .= " (Penyesuaian Konflik: Dialihkan ke {$selectedRankItem['instructor_name']} karena kandidat peringkat sebelumnya telah ditugaskan pada kelas '{$conflictingClass}' yang jadwalnya bersamaan).";
+                    $enhancedSchedules[$index] = $this->rebuildScheduleEvaluation($eval, $aiData);
+                }
+            } else {
+                // Seluruh kandidat bentrok dengan kelas lain yang bersamaan
+                $aiData['best_candidate_id'] = null;
+                $aiData['summary_explanation'] .= ' (Perhatian: Seluruh kandidat pengganti bentrok penugasan dengan kelas terdampak lain yang jadwalnya bersamaan).';
+                $enhancedSchedules[$index] = $this->rebuildScheduleEvaluation($eval, $aiData);
+            }
+        }
+
+        return $enhancedSchedules;
+    }
+
+    /**
+     * Helper to check if two time intervals overlap.
+     */
+    protected function intervalsOverlap(string $startA, string $endA, string $startB, string $endB): bool
+    {
+        return max($startA, $startB) < min($endA, $endB);
     }
 
     /**
@@ -313,11 +397,12 @@ PROMPT;
                 'instructor_name' => $c->instructorName,
                 'rank' => $idx + 1,
                 'ai_reasoning' => implode('; ', $c->reasons),
-                'confidence_score' => $c->score,
+                'confidence_score' => null, // Confidence score adalah metrik khusus AI, tidak diisi dengan skor deterministik
             ];
         }
 
         return [
+            'status' => 'fallback',
             'is_ai_generated' => false,
             'model' => $this->model,
             'best_candidate_id' => $eval->bestCandidate?->instructorId,
@@ -330,6 +415,7 @@ PROMPT;
 
     /**
      * Generate overall executive summary across all affected schedules.
+     * Distinguishes 4 statuses: 'success', 'partial', 'fallback', 'not_applicable'.
      *
      * @param  list<ScheduleEvaluation>  $enhancedSchedules
      * @return array<string, mixed>
@@ -337,53 +423,74 @@ PROMPT;
     protected function generateExecutiveSummary(SchedulingResult $result, array $enhancedSchedules): array
     {
         $total = count($enhancedSchedules);
-        $resolved = count(array_filter($enhancedSchedules, fn ($s) => $s->isResolved()));
-        $aiGeneratedCount = collect($enhancedSchedules)->filter(fn ($s) => ($s->aiRecommendation['is_ai_generated'] ?? false) === true)->count();
-        $fallbackCount = collect($enhancedSchedules)->filter(fn ($s) => ($s->aiRecommendation['fallback_used'] ?? false) === true)->count();
+        $eligibleSchedules = collect($enhancedSchedules)->filter(fn ($s) => ! empty($s->validCandidates))->values();
+        $eligibleCount = $eligibleSchedules->count();
 
-        if ($total === 0) {
+        $successCount = $eligibleSchedules->filter(fn ($s) => ($s->aiRecommendation['status'] ?? '') === 'success')->count();
+        $fallbackCount = $eligibleSchedules->filter(fn ($s) => ($s->aiRecommendation['status'] ?? '') === 'fallback')->count();
+
+        // 1. Not Applicable: tidak ada kelas terdampak atau tidak ada kandidat valid sama sekali
+        if ($total === 0 || $eligibleCount === 0) {
+            $reason = $total === 0
+                ? 'Tidak ada jadwal mengajar yang terdampak pada periode izin ini. Analisis AI tidak diperlukan.'
+                : 'Tidak ada kandidat pengganti yang memenuhi syarat untuk dianalisis oleh Gemini AI. Rekomendasi penjadwalan memerlukan tindakan manual admin.';
+
             return [
+                'status' => 'not_applicable',
                 'is_ai_generated' => false,
                 'model' => $this->model,
-                'executive_summary' => 'Tidak ada jadwal mengajar yang terdampak pada periode izin ini. Tidak diperlukan tindakan penggantian instruktur.',
+                'executive_summary' => $reason,
                 'fallback_used' => false,
                 'fallback_reason' => null,
                 'generated_at' => now()->toIso8601String(),
             ];
         }
 
-        // Jika API gagal atau seluruh jadwal menggunakan fallback
-        if ($aiGeneratedCount === 0 && $fallbackCount > 0) {
-            $reasons = collect($enhancedSchedules)
-                ->pluck('aiRecommendation.fallback_reason')
-                ->filter()
-                ->unique()
-                ->implode('; ');
-            $reasonText = $reasons ?: 'Layanan AI tidak dapat diakses';
+        // 2. Success: seluruh kelas yang memenuhi syarat berhasil dianalisis penuh oleh Gemini AI
+        if ($eligibleCount > 0 && $successCount === $eligibleCount) {
+            $text = "Analisis Gemini AI ({$this->model}): Seluruh {$eligibleCount} kelas terdampak berhasil dianalisis dan diperingkat berdasarkan kesesuaian keahlian serta beban mengajar. Rekomendasi siap ditinjau dan disetujui oleh admin.";
 
             return [
-                'is_ai_generated' => false,
+                'status' => 'success',
+                'is_ai_generated' => true,
                 'model' => $this->model,
-                'executive_summary' => "Mode Fallback Aktif: Analisis AI Gemini tidak tersedia ({$reasonText}). Rekomendasi dihitung menggunakan Scheduling Engine deterministik berbasis kompetensi dan ketersediaan.",
-                'fallback_used' => true,
-                'fallback_reason' => $reasonText,
+                'executive_summary' => $text,
+                'fallback_used' => false,
+                'fallback_reason' => null,
                 'generated_at' => now()->toIso8601String(),
             ];
         }
 
-        // Jika rekomendasi berhasil dihasilkan oleh Gemini AI
-        if ($resolved === $total) {
-            $text = "Analisis Gemini AI ({$this->model}): Seluruh {$total} kelas terdampak berhasil dicarikan rekomendasi instruktur pengganti yang kompeten dan bebas bentrok jadwal/ruangan. Rekomendasi siap ditinjau dan disetujui oleh admin.";
-        } else {
-            $text = "Analisis Gemini AI ({$this->model}): Ditemukan {$total} kelas terdampak, {$resolved} kelas berhasil dicarikan solusi pengganti, dan ".($total - $resolved).' kelas memerlukan penyesuaian khusus oleh admin.';
+        // 3. Partial: sebagian kelas berhasil dianalisis, sebagian menggunakan fallback
+        if ($eligibleCount > 0 && $successCount > 0 && $fallbackCount > 0) {
+            $text = "Analisis Sebagian (Partial): {$successCount} kelas berhasil dianalisis dengan Gemini AI ({$this->model}), sementara {$fallbackCount} kelas menggunakan rekomendasi deterministik sistem akibat kendala API.";
+
+            return [
+                'status' => 'partial',
+                'is_ai_generated' => true,
+                'model' => $this->model,
+                'executive_summary' => $text,
+                'fallback_used' => true,
+                'fallback_reason' => "Sebagian kelas ({$fallbackCount}) menggunakan fallback deterministik.",
+                'generated_at' => now()->toIso8601String(),
+            ];
         }
 
+        // 4. Fallback: seluruh kelas eligible gagal dan beralih ke deterministik
+        $reasons = collect($enhancedSchedules)
+            ->pluck('aiRecommendation.fallback_reason')
+            ->filter()
+            ->unique()
+            ->implode('; ');
+        $reasonText = $reasons ?: 'Layanan AI tidak dapat diakses';
+
         return [
-            'is_ai_generated' => true,
+            'status' => 'fallback',
+            'is_ai_generated' => false,
             'model' => $this->model,
-            'executive_summary' => $text,
-            'fallback_used' => false,
-            'fallback_reason' => null,
+            'executive_summary' => "Mode Fallback Aktif: Analisis AI Gemini tidak tersedia ({$reasonText}). Rekomendasi dihitung menggunakan Scheduling Engine deterministik berbasis kompetensi dan ketersediaan.",
+            'fallback_used' => true,
+            'fallback_reason' => $reasonText,
             'generated_at' => now()->toIso8601String(),
         ];
     }

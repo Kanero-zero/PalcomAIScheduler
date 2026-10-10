@@ -8,6 +8,7 @@ use App\Services\Scheduling\GeminiSchedulingAdvisor;
 use App\Services\Scheduling\SchedulingEngine;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Component;
 
 class InstructorLeaveForm extends Component
@@ -192,6 +193,8 @@ class InstructorLeaveForm extends Component
      */
     public function analyzeWithAi(): ?array
     {
+        Gate::authorize('analyze-with-ai');
+
         if (! $this->schedulingResult || ! $this->submittedLeaveId) {
             return null;
         }
@@ -209,10 +212,16 @@ class InstructorLeaveForm extends Component
 
         $this->schedulingResult = $enhancedResult->toArray();
 
-        if ($enhancedResult->aiSummary && ($enhancedResult->aiSummary['fallback_used'] ?? false)) {
+        $status = $enhancedResult->aiSummary['status'] ?? (($enhancedResult->aiSummary['fallback_used'] ?? false) ? 'fallback' : 'success');
+
+        if ($status === 'success') {
+            $this->feedbackMessage = 'Rekomendasi berhasil dianalisis dan diperkaya dengan Google Gemini 3.5 Flash-Lite.';
+        } elseif ($status === 'partial') {
+            $this->feedbackMessage = 'Analisis AI selesai sebagian. Beberapa kelas menggunakan rekomendasi deterministik (Mode Fallback).';
+        } elseif ($status === 'fallback') {
             $this->feedbackMessage = 'Layanan Gemini AI tidak dapat dijangkau. Rekomendasi tetap menggunakan hasil deterministik (Mode Fallback).';
         } else {
-            $this->feedbackMessage = 'Rekomendasi berhasil dianalisis dan diperkaya dengan Google Gemini 3.5 Flash-Lite.';
+            $this->feedbackMessage = 'Tidak ada kandidat valid untuk dianalisis oleh AI. Rekomendasi mengandalkan hasil deterministik.';
         }
 
         return $this->schedulingResult;
