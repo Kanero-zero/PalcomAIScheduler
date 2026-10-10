@@ -769,3 +769,103 @@ Setiap transaksi menyimpan data yang dapat langsung dipetakan ke timeline `/acti
 - `title`: `'Rekomendasi instruktur disetujui'` / `'Usulan pengganti ditolak'`
 - `description`: Detail nama pengganti atau alasan penolakan yang tersimpan.
 
+---
+
+## 6. KONTRAK DATA & ARSITEKTUR BACKEND ACTIVITY LOG (TAHAP 13)
+
+### A. Tujuan & Ruang Lingkup
+Mencatat seluruh siklus hidup penjadwalan instruktur pengganti secara persisten di database SQLite/MySQL, merekam kejadian nyata dari:
+1. **Pengajuan Izin (`leave`)**: Perekaman pengajuan izin instruktur baru.
+2. **Scheduling Engine (`engine`)**: Deteksi kelas terdampak serta evaluasi kesesuaian kandidat dan ruangan.
+3. **Analisis AI (`ai`)**: Hasil rekomendasi Gemini AI atau fallback deterministik.
+4. **Persetujuan Admin (`approval`)**: Keputusan Approve atau Reject pengganti oleh admin.
+5. **Pembaruan Jadwal (`schedule`)**: Penerapan instruktur pengganti ke jadwal kelas.
+
+---
+
+### B. Skema Database (`activity_logs`)
+
+Tabel baru: **`activity_logs`**
+
+```php
+Schema::create('activity_logs', function (Blueprint $table) {
+    $table->id();
+    $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
+    $table->string('type', 32)->index(); // leave, engine, ai, approval, schedule
+    $table->string('state', 32)->index(); // success, pending, rejected, info, warning
+    $table->string('actor'); // Nama user, 'Sistem', atau 'Gemini AI'
+    $table->string('title');
+    $table->text('description');
+    $table->string('subject'); // e.g. 'Pengajuan Izin #1', 'Microsoft Excel - Lab 2'
+    $table->foreignId('instructor_leave_id')->nullable()->constrained('instructor_leaves')->nullOnDelete();
+    $table->foreignId('schedule_id')->nullable()->constrained('schedules')->nullOnDelete();
+    $table->string('fingerprint', 64)->nullable()->index(); // Untuk pencegahan duplikasi log evaluasi
+    $table->json('metadata')->nullable(); // Context data terstruktur (tanpa API key)
+    $table->timestamps();
+
+    $table->index(['created_at', 'type']);
+});
+```
+
+---
+
+### C. Pemetaan Tipe Aktivitas & Label UI
+
+| Type | Type Label | State | State Label | Actor Default | Subject | Contoh Title |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `leave` | Pengajuan Izin | `pending` | Menunggu | User Name / Admin | `Pengajuan Izin #{id}` | Pengajuan izin instruktur dicatat |
+| `engine` | Scheduling Engine | `success` | Selesai | `Sistem` | `Pengajuan Izin #{id}` | Kandidat pengganti ditemukan / evaluasi selesai |
+| `ai` | Analisis AI | `success` / `fallback` | Selesai / Fallback | `Gemini AI` | `Pengajuan Izin #{id}` | Rekomendasi instruktur dianalisis oleh AI |
+| `approval` | Persetujuan | `success` / `rejected` | Disetujui / Ditolak | Admin Name | `Pengajuan Izin #{id}` | Rekomendasi instruktur disetujui / Usulan ditolak |
+| `schedule` | Jadwal | `success` | Berhasil | `Sistem` / Admin Name | `{Class Name} - {Room}` | Jadwal kelas diperbarui |
+
+---
+
+### D. Format Data untuk Konsumsi Livewire / Timeline UI
+
+Method pada model `ActivityLog::toTimelineArray()` menghasilkan format yang persis dibutuhkan oleh view `resources/views/pages/activity-log.blade.php`:
+
+```php
+[
+    'id' => 12,
+    'at' => '10 Okt 2026, 11.45 WIB',
+    'type' => 'approval',
+    'type_label' => 'Persetujuan',
+    'state' => 'success',
+    'state_label' => 'Disetujui',
+    'actor' => 'Admin BAAK PalComTech',
+    'title' => 'Rekomendasi instruktur disetujui',
+    'description' => 'Admin menyetujui Wahyu sebagai instruktur pengganti untuk sesi terdampak.',
+    'subject' => 'Pengajuan Izin #1',
+    'metadata' => [
+        'leave_id' => 1,
+        'schedule_id' => 3,
+        'replacement_instructor_id' => 2,
+        'original_instructor_id' => 1,
+    ],
+]
+```
+
+---
+
+### E. Strategi Pencegahan Duplikasi Log (Deduplication)
+
+1. **Evaluasi Engine:**
+   - Karena halaman `AiScheduler` dan `ApprovalReview` menjalankan evaluasi setiap kali dibuka (`mount()`, `selectLeave()`), evaluasi engine menggunakan hash `fingerprint`:
+     `sha1("engine:{$leaveId}:{$totalAffected}:{$totalResolved}:" . implode(',', $scheduleIds))`
+   - Log engine tidak akan diduplikasi jika fingerprint identik sudah dicatat dalam kurun waktu 1 jam terakhir, kecuali status evaluasi mengalami perubahan nyata.
+2. **Analisis AI:**
+   - Hanya dicatat ketika action `analyzeWithAi()` dipicu secara eksplisit oleh admin.
+3. **Persetujuan & Penolakan:**
+   - Dicatat satu kali per eksekusi keputusan pada jadwal kelas terkait.
+
+---
+
+### F. Integritas Transaksi & Keamanan Data
+
+1. **Atomisitas Transaksi:**
+   - Log untuk `approval` dan `schedule` dicatat di dalam blok `DB::transaction()` pada `ScheduleApprovalService`. Jika validasi gagal atau rollback terjadi, entri log otomatis ikut ter-rollback.
+2. **Zero Leakage:**
+   - Metadata JSON dilarang menyimpan API Key, token otentikasi, atau password hash.
+
+
