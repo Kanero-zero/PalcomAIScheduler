@@ -528,18 +528,76 @@ test('it sets best_candidate_id to null and warns if all ai candidates have cros
         ->and($rec2['summary_explanation'])->toContain('Seluruh kandidat pengganti bentrok penugasan');
 });
 
-test('it authorizes analyzeWithAi and rejects unauthenticated guests with 403', function () {
+test('it correctly identifies admin users via isAdmin method', function () {
+    $admin1 = User::where('email', 'admin@palcomtech.ac.id')->firstOrFail();
+    $admin2 = User::where('email', 'admin@example.com')->firstOrFail();
+    $admin3 = User::factory()->create(['email' => 'admin_baak@palcomtech.ac.id']);
+    $regularUser = User::factory()->create(['email' => 'dosen@palcomtech.ac.id']);
+    $outsideUser = User::factory()->create(['email' => 'student@gmail.com']);
+
+    expect($admin1->isAdmin())->toBeTrue()
+        ->and($admin2->isAdmin())->toBeTrue()
+        ->and($admin3->isAdmin())->toBeTrue()
+        ->and($regularUser->isAdmin())->toBeFalse()
+        ->and($outsideUser->isAdmin())->toBeFalse();
+});
+
+test('it authorizes admin user to execute analyzeWithAi successfully', function () {
+    $admin = User::factory()->admin()->create();
+    $this->actingAs($admin);
+
+    Http::fake([
+        'https://generativelanguage.googleapis.com/*' => Http::response([
+            'candidates' => [
+                [
+                    'content' => [
+                        'parts' => [
+                            [
+                                'text' => json_encode([
+                                    'best_candidate_id' => 2,
+                                    'summary_explanation' => 'Analisis admin sukses.',
+                                    'rankings' => [
+                                        ['instructor_id' => 2, 'instructor_name' => 'Kanero', 'rank' => 1, 'confidence_score' => 95, 'ai_reasoning' => 'Admin test.'],
+                                    ],
+                                ]),
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+            'modelVersion' => 'gemini-3.5-flash-lite',
+        ], 200),
+    ]);
+
     $leave = InstructorLeave::firstOrFail();
 
     Livewire::test(AiScheduler::class)
         ->call('selectLeave', $leave->id)
         ->call('analyzeWithAi')
-        ->assertForbidden();
+        ->assertSuccessful()
+        ->assertHasNoErrors();
+
+    Http::assertSent(fn (Request $req) => str_contains($req->url(), 'generativelanguage.googleapis.com'));
 });
 
-test('it rejects guest on InstructorLeaveForm analyzeWithAi action with 403', function () {
-    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+test('it rejects regular non-admin user with 403 on analyzeWithAi without calling Gemini API', function () {
+    $regularUser = User::factory()->create(['email' => 'regular_staff@palcomtech.ac.id']);
+    expect($regularUser->isAdmin())->toBeFalse();
 
+    $this->actingAs($regularUser);
+
+    Http::fake();
+
+    $leave = InstructorLeave::firstOrFail();
+
+    // 1. Ditolak pada AiScheduler
+    Livewire::test(AiScheduler::class)
+        ->call('selectLeave', $leave->id)
+        ->call('analyzeWithAi')
+        ->assertForbidden();
+
+    // 2. Ditolak pada InstructorLeaveForm
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
     Livewire::test(InstructorLeaveForm::class)
         ->set('form.instructor_id', $wahyu->id)
         ->set('form.date', '2026-11-25')
@@ -548,6 +606,35 @@ test('it rejects guest on InstructorLeaveForm analyzeWithAi action with 403', fu
         ->call('submitLeave')
         ->call('analyzeWithAi')
         ->assertForbidden();
+
+    // Pastikan pengguna yang ditolak tidak menyebabkan request ke Gemini API
+    Http::assertNothingSent();
+});
+
+test('it rejects unauthenticated guests with 403 on analyzeWithAi without calling Gemini API', function () {
+    Http::fake();
+
+    $leave = InstructorLeave::firstOrFail();
+
+    // 1. Ditolak pada AiScheduler
+    Livewire::test(AiScheduler::class)
+        ->call('selectLeave', $leave->id)
+        ->call('analyzeWithAi')
+        ->assertForbidden();
+
+    // 2. Ditolak pada InstructorLeaveForm
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+    Livewire::test(InstructorLeaveForm::class)
+        ->set('form.instructor_id', $wahyu->id)
+        ->set('form.date', '2026-11-25')
+        ->set('form.start_time', '13:00')
+        ->set('form.end_time', '15:00')
+        ->call('submitLeave')
+        ->call('analyzeWithAi')
+        ->assertForbidden();
+
+    // Pastikan request ke Gemini API tidak dipanggil sama sekali
+    Http::assertNothingSent();
 });
 
 test('it falls back gracefully and marks fallback mode explicitly when Gemini API fails', function () {

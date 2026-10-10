@@ -517,3 +517,13 @@ Eksekusi CLI dengan AI:
 php artisan schedule:evaluate --ai
 ```
 
+---
+
+### 8. Hak Akses & Otorisasi Penggunaan Gemini AI
+Aksi `analyzeWithAi()` dilindungi secara ketat oleh otorisasi `Gate::authorize('analyze-with-ai')`:
+- **Admin**: Diizinkan (`Response::allow()`). Menjalankan evaluasi AI Google Gemini 3.5 Flash-Lite.
+- **Pengguna Biasa (Non-Admin)**: Ditolak dengan HTTP 403 Forbidden (`Response::deny('Hanya pengguna dengan hak akses administrator yang dapat menjalankan analisis Gemini AI.')`).
+- **Pengguna Belum Login (Guest)**: Ditolak dengan HTTP 403 Forbidden.
+- **Proteksi API**: Penolakan otorisasi terjadi sebelum pemanggilan layer AI, sehingga request tidak berwenang dijamin tidak memicu panggilan HTTP ke endpoint Gemini API.
+- **Mekanisme Penentuan Admin Sementara (Interim RBAC)**: Menggunakan `$user->isAdmin()`, yang memvalidasi email terhadap konfigurasi `config('auth.admin_emails')` (default: `admin@palcomtech.ac.id`, `admin@example.com`), prefix email `admin@`, atau atribut `role === 'admin'` / `is_admin === true` jika tersedia di masa depan.
+

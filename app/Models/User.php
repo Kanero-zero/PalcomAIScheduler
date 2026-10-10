@@ -59,4 +59,36 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
             ? Str::substr($initials, 0, 1).Str::substr($initials, -1)
             : $initials;
     }
+
+    /**
+     * Tentukan apakah pengguna memiliki hak akses administrator.
+     * Mekanisme pembatasan sementara yang aman dan terdokumentasi
+     * berbasis konfigurasi email admin, format email, dan atribut role jika ada.
+     */
+    public function isAdmin(): bool
+    {
+        if (isset($this->role) && $this->role === 'admin') {
+            return true;
+        }
+
+        if (isset($this->is_admin) && (bool) $this->is_admin) {
+            return true;
+        }
+
+        /** @var list<string> $adminEmails */
+        $adminEmails = config('auth.admin_emails', [
+            'admin@palcomtech.ac.id',
+            'admin@example.com',
+        ]);
+
+        $email = strtolower($this->email);
+
+        if (in_array($email, array_map('strtolower', (array) $adminEmails), true)) {
+            return true;
+        }
+
+        return str_starts_with($email, 'admin@')
+            || str_starts_with($email, 'admin_')
+            || str_starts_with($email, 'admin.');
+    }
 }
