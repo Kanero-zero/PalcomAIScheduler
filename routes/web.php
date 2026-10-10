@@ -8,6 +8,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
     Route::view('ai-scheduler', 'pages.ai-scheduler')->name('ai-scheduler');
     Route::view('activity-log', 'pages.activity-log')->name('activity-log');
+    Route::view('approval-review', 'pages.approval-review')->name('approval-review');
     Route::view('schedules', 'pages.schedules')->name('schedules.index');
     Route::view('instructors', 'pages.instructors')->name('instructors.index');
     Route::view('rooms', 'pages.rooms')->name('rooms.index');
