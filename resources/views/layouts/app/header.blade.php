@@ -62,6 +62,9 @@
                     <flux:sidebar.item icon="clock" :href="route('activity-log')" :current="request()->routeIs('activity-log')" wire:navigate>
                         {{ __('Activity Log') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="check-circle" :href="route('approval-review')" :current="request()->routeIs('approval-review')" wire:navigate>
+                        {{ __('Approval / Reject') }}
+                    </flux:sidebar.item>
                     <flux:sidebar.item icon="calendar" :href="route('schedules.index')" :current="request()->routeIs('schedules.*')" wire:navigate>
                         {{ __('Jadwal Mengajar') }}
                     </flux:sidebar.item>
