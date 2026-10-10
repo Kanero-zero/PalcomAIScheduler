@@ -57,4 +57,21 @@ class UserFactory extends Factory
             'two_factor_confirmed_at' => now(),
         ]);
     }
+
+    /**
+     * Indicate that the user is an administrator.
+     */
+    public function admin(): static
+    {
+        return $this->state(function (array $attributes) {
+            $email = 'admin_'.Str::lower(Str::random(6)).'@palcomtech.ac.id';
+            $current = (array) config('auth.admin_emails', ['admin@palcomtech.ac.id', 'admin@example.com']);
+            config()->set('auth.admin_emails', array_values(array_unique([...$current, $email])));
+
+            return [
+                'name' => 'Admin '.fake()->lastName(),
+                'email' => $email,
+            ];
+        });
+    }
 }

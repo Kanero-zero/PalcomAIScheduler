@@ -45,6 +45,16 @@ class SchedulingEngine
     }
 
     /**
+     * Evaluate leave deterministically and enhance recommendations with Google Gemini AI.
+     */
+    public function evaluateWithAi(InstructorLeave $leave): SchedulingResult
+    {
+        $deterministicResult = $this->evaluateLeave($leave);
+
+        return app(GeminiSchedulingAdvisor::class)->enhanceEvaluation($deterministicResult);
+    }
+
+    /**
      * Evaluate replacement candidates given instructor ID, date, and leave time window.
      */
     public function evaluate(

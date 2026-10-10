@@ -114,4 +114,17 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Administrator Emails (Interim RBAC Configuration)
+    |--------------------------------------------------------------------------
+    |
+    | Daftar alamat email pengguna yang memiliki wewenang administrator,
+    | termasuk hak untuk menjalankan evaluasi AI Google Gemini 3.5 Flash-Lite,
+    | sebagai mekanisme pembatasan sementara yang aman dan terdokumentasi.
+    |
+    */
+
+    'admin_emails' => array_filter(array_map('trim', explode(',', env('ADMIN_EMAILS', 'admin@palcomtech.ac.id,admin@example.com')))),
+
 ];
