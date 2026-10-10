@@ -46,7 +46,7 @@ class ScheduleEvaluation
      */
     public function hasValidRoom(): bool
     {
-        return $this->roomEvaluation === null || $this->roomEvaluation->hasUsableRoom();
+        return $this->roomEvaluation !== null && $this->roomEvaluation->hasUsableRoom();
     }
 
     /**

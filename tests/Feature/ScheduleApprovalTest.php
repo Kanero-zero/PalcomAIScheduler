@@ -13,6 +13,7 @@ use App\Services\Scheduling\ScheduleApprovalService;
 use App\Services\Scheduling\SchedulingEngine;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -447,4 +448,178 @@ test('Livewire components AiScheduler and ApprovalReview can execute approval an
 
     $sub2 = ScheduleSubstitution::where('schedule_id', $schedule2->id)->firstOrFail();
     expect($sub2->status)->toBe('rejected');
+});
+
+test('it rejects approval and rejection for cancelled schedule', function () {
+    $this->actingAs($this->admin);
+
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+    $kanero = Instructor::where('name', 'Kanero')->firstOrFail();
+
+    $leave = InstructorLeave::create([
+        'instructor_id' => $wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'pending',
+    ]);
+
+    $schedule = Schedule::where('instructor_id', $wahyu->id)
+        ->whereDate('date', '2026-10-15')
+        ->firstOrFail();
+
+    $schedule->update(['status' => 'cancelled']);
+
+    // Approval must fail
+    expect(fn () => $this->service->approveSubstitution($leave->id, $schedule->id, $kanero->id))
+        ->toThrow(ValidationException::class);
+
+    // Rejection must also fail
+    expect(fn () => $this->service->rejectSubstitution($leave->id, $schedule->id, 'Alasan penolakan valid minimal 10 karakter.'))
+        ->toThrow(ValidationException::class);
+});
+
+test('it rejects approval if schedule has no valid room or room is deleted', function () {
+    $this->actingAs($this->admin);
+
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+    $kanero = Instructor::where('name', 'Kanero')->firstOrFail();
+
+    $leave = InstructorLeave::create([
+        'instructor_id' => $wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'pending',
+    ]);
+
+    $schedule = Schedule::where('instructor_id', $wahyu->id)
+        ->whereDate('date', '2026-10-15')
+        ->firstOrFail();
+
+    // Hapus ruangan yang bersangkutan untuk menguji kondisi ruangan tidak ditemukan
+    DB::statement('PRAGMA foreign_keys = OFF;');
+    Room::where('id', $schedule->room_id)->delete();
+    DB::statement('PRAGMA foreign_keys = ON;');
+
+    expect(fn () => $this->service->approveSubstitution($leave->id, $schedule->id, $kanero->id))
+        ->toThrow(ValidationException::class);
+});
+
+test('it prevents cross-schedule double booking when two overlapping classes try to assign the same candidate', function () {
+    $this->actingAs($this->admin);
+
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+    $kanero = Instructor::where('name', 'Kanero')->firstOrFail();
+    $officeClass = CourseClass::where('subject', 'Microsoft Excel')->firstOrFail();
+    $room1 = Room::firstOrFail();
+    $room2 = Room::where('id', '!=', $room1->id)->firstOrFail();
+
+    $leave = InstructorLeave::create([
+        'instructor_id' => $wahyu->id,
+        'date' => '2026-10-25',
+        'start_time' => '09:00',
+        'end_time' => '12:00',
+        'status' => 'pending',
+    ]);
+
+    // Schedule 1: 09:00 - 11:00
+    $schedule1 = Schedule::create([
+        'course_class_id' => $officeClass->id,
+        'instructor_id' => $wahyu->id,
+        'room_id' => $room1->id,
+        'date' => '2026-10-25',
+        'start_time' => '09:00',
+        'end_time' => '11:00',
+        'status' => 'scheduled',
+    ]);
+
+    // Schedule 2: 10:00 - 12:00 (overlaps with schedule 1)
+    $schedule2 = Schedule::create([
+        'course_class_id' => $officeClass->id,
+        'instructor_id' => $wahyu->id,
+        'room_id' => $room2->id,
+        'date' => '2026-10-25',
+        'start_time' => '10:00',
+        'end_time' => '12:00',
+        'status' => 'scheduled',
+    ]);
+
+    // Approve Schedule 1 with Kanero
+    $this->service->approveSubstitution($leave->id, $schedule1->id, $kanero->id);
+
+    // Attempt to approve overlapping Schedule 2 with same instructor Kanero
+    expect(fn () => $this->service->approveSubstitution($leave->id, $schedule2->id, $kanero->id))
+        ->toThrow(ValidationException::class);
+});
+
+test('it translates database concurrency and unique constraint collisions into clean validation errors', function () {
+    $this->actingAs($this->admin);
+
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+    $kanero = Instructor::where('name', 'Kanero')->firstOrFail();
+
+    $leave = InstructorLeave::create([
+        'instructor_id' => $wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'pending',
+    ]);
+
+    $schedule = Schedule::where('instructor_id', $wahyu->id)
+        ->whereDate('date', '2026-10-15')
+        ->firstOrFail();
+
+    // Insert an existing substitution behind the scenes to simulate race condition where another request finished
+    ScheduleSubstitution::create([
+        'instructor_leave_id' => $leave->id,
+        'schedule_id' => $schedule->id,
+        'original_instructor_id' => $wahyu->id,
+        'replacement_instructor_id' => $kanero->id,
+        'status' => 'approved',
+        'decision_by' => $this->admin->id,
+        'decision_at' => now(),
+    ]);
+
+    // Now attempting to approve or reject hits concurrency check and throws ValidationException
+    expect(fn () => $this->service->approveSubstitution($leave->id, $schedule->id, $kanero->id))
+        ->toThrow(ValidationException::class);
+
+    expect(fn () => $this->service->rejectSubstitution($leave->id, $schedule->id, 'Alasan penolakan valid minimal 10 karakter.'))
+        ->toThrow(ValidationException::class);
+});
+
+test('it safely handles query exception unique violation as friendly validation error', function () {
+    $this->actingAs($this->admin);
+
+    $wahyu = Instructor::where('name', 'Wahyu')->firstOrFail();
+    $kanero = Instructor::where('name', 'Kanero')->firstOrFail();
+
+    $leave = InstructorLeave::create([
+        'instructor_id' => $wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'pending',
+    ]);
+
+    $schedule = Schedule::where('instructor_id', $wahyu->id)
+        ->whereDate('date', '2026-10-15')
+        ->firstOrFail();
+
+    // Mock ScheduleSubstitution saving event throwing QueryException with unique constraint violation
+    $mockQueryException = new QueryException(
+        'sqlite',
+        'insert into "schedule_substitutions" ...',
+        [],
+        new Exception('UNIQUE constraint failed: schedule_substitutions.instructor_leave_id, schedule_substitutions.schedule_id')
+    );
+
+    ScheduleSubstitution::saving(function () use ($mockQueryException) {
+        throw $mockQueryException;
+    });
+
+    expect(fn () => $this->service->approveSubstitution($leave->id, $schedule->id, $kanero->id))
+        ->toThrow(ValidationException::class);
 });

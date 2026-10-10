@@ -201,7 +201,7 @@ class SchedulingEngine
         $bestCandidate = $validCandidates[0] ?? null;
 
         $hasCandidates = ! empty($validCandidates);
-        $hasUsableRoom = $roomEvaluation === null || $roomEvaluation->hasUsableRoom();
+        $hasUsableRoom = $roomEvaluation !== null && $roomEvaluation->hasUsableRoom();
         $requiresRoomChange = $roomEvaluation !== null && $roomEvaluation->requiresRoomChange;
 
         if ($hasCandidates && $hasUsableRoom) {
@@ -213,7 +213,8 @@ class SchedulingEngine
             }
         } elseif ($hasCandidates && ! $hasUsableRoom) {
             $status = 'room_issue';
-            $summary = 'Ditemukan '.count($validCandidates)." kandidat pengganti, namun ruangan bermasalah: {$roomEvaluation->notes}";
+            $roomNotes = $roomEvaluation ? $roomEvaluation->notes : 'Jadwal tidak memiliki alokasi ruangan yang valid.';
+            $summary = 'Ditemukan '.count($validCandidates)." kandidat pengganti, namun ruangan bermasalah: {$roomNotes}";
         } elseif (! $hasCandidates && $hasUsableRoom) {
             $status = 'no_candidate';
             $summary = 'Belum ada instruktur pengganti yang memenuhi kualifikasi kompetensi dan bebas bentrok jadwal untuk kelas ini.';
