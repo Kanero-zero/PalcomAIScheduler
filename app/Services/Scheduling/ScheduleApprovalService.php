@@ -181,16 +181,9 @@ class ScheduleApprovalService
                         'decision_at' => $decisionAt->toIso8601String(),
                     ],
                 ];
-            });
+            }, 3);
         } catch (QueryException $e) {
-            // Tangani konflik race condition (misal: unique constraint uq_leave_schedule_sub atau database lock)
-            if (str_contains($e->getMessage(), 'UNIQUE constraint failed') || str_contains($e->getMessage(), 'Duplicate entry') || $e->getCode() === '23000') {
-                throw ValidationException::withMessages([
-                    'schedule_id' => 'Jadwal ini sedang atau sudah diproses oleh permintaan lain. Silakan muat ulang halaman.',
-                ]);
-            }
-
-            throw $e;
+            $this->handleConcurrencyQueryException($e);
         }
     }
 
@@ -292,16 +285,45 @@ class ScheduleApprovalService
                         'decision_at' => $decisionAt->toIso8601String(),
                     ],
                 ];
-            });
+            }, 3);
         } catch (QueryException $e) {
-            if (str_contains($e->getMessage(), 'UNIQUE constraint failed') || str_contains($e->getMessage(), 'Duplicate entry') || $e->getCode() === '23000') {
-                throw ValidationException::withMessages([
-                    'schedule_id' => 'Jadwal ini sedang atau sudah diproses oleh permintaan lain. Silakan muat ulang halaman.',
-                ]);
-            }
-
-            throw $e;
+            $this->handleConcurrencyQueryException($e);
         }
+    }
+
+    /**
+     * Menangani QueryException akibat race condition atau penguncian SQLite.
+     *
+     * @throws ValidationException|QueryException
+     */
+    protected function handleConcurrencyQueryException(QueryException $e): never
+    {
+        $message = strtolower($e->getMessage());
+
+        if (
+            str_contains($message, 'unique constraint failed') ||
+            str_contains($message, 'duplicate entry') ||
+            str_contains($message, 'uq_leave_schedule_sub') ||
+            $e->getCode() === '23000'
+        ) {
+            throw ValidationException::withMessages([
+                'schedule_id' => 'Jadwal ini sedang atau sudah diproses oleh permintaan lain. Silakan muat ulang halaman.',
+            ]);
+        }
+
+        if (
+            str_contains($message, 'database is locked') ||
+            str_contains($message, 'table is locked') ||
+            str_contains($message, 'busy') ||
+            $e->getCode() === 'HY000' ||
+            ($e->errorInfo[1] ?? null) === 5
+        ) {
+            throw ValidationException::withMessages([
+                'schedule_id' => 'Sistem sedang sibuk memproses transaksi lain pada database. Silakan muat ulang halaman dan coba kembali.',
+            ]);
+        }
+
+        throw $e;
     }
 
     /**
