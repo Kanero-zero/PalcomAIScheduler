@@ -309,7 +309,7 @@ config(['database.connections.sqlite_worker' => [
     'database' => '{$sqlitePath}',
     'prefix' => '',
     'foreign_key_constraints' => true,
-    'busy_timeout' => 2000,
+    'busy_timeout' => 10000,
 ]]);
 
 auth()->login(\App\Models\User::where('email', 'admin@palcomtech.ac.id')->firstOrFail());
