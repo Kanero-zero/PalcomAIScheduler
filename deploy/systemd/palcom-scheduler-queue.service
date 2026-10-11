@@ -1,0 +1,17 @@
+[Unit]
+Description=PALCOM AI Scheduler Queue Worker
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+Restart=always
+RestartSec=3
+WorkingDirectory=/var/www/palcom-ai-scheduler
+ExecStart=/usr/bin/php /var/www/palcom-ai-scheduler/artisan queue:work --sleep=3 --tries=3 --max-time=3600
+StandardOutput=append:/var/log/palcom_scheduler_queue.log
+StandardError=append:/var/log/palcom_scheduler_queue_error.log
+
+[Install]
+WantedBy=multi-user.target
