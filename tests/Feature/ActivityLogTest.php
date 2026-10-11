@@ -11,6 +11,7 @@ use App\Services\ActivityLog\ActivityLogService;
 use App\Services\Scheduling\DTOs\SchedulingResult;
 use App\Services\Scheduling\ScheduleApprovalService;
 use App\Services\Scheduling\SchedulingEngine;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 
@@ -535,4 +536,27 @@ test('method toTimelineArray dan getTimelineActivities menghasilkan data yang si
 
     $emptyFilter = $this->service->getTimelineActivities(type: 'non_existent_type');
     expect($emptyFilter)->toBeEmpty();
+});
+
+test('toTimelineArray mengonversi timestamp UTC ke zona waktu Asia/Jakarta sebelum menampilkan label WIB', function () {
+    $leave = InstructorLeave::create([
+        'instructor_id' => $this->wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '17:00',
+        'status' => 'pending',
+    ]);
+
+    $log = ActivityLog::where('instructor_leave_id', $leave->id)->firstOrFail();
+
+    // Set created_at eksplisit dalam UTC: 2026-10-15 01:30:00 UTC (ekuivalen 08:30 WIB)
+    $utcTime = Carbon::create(2026, 10, 15, 1, 30, 0, 'UTC');
+    $log->created_at = $utcTime;
+    $log->save();
+
+    app()->setLocale('id');
+    $array = $log->toTimelineArray();
+
+    // 01:30 UTC + 7 jam = 08:30 WIB
+    expect($array['at'])->toBe('15 Okt 2026, 08.30 WIB');
 });

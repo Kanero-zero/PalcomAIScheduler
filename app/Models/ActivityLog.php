@@ -129,7 +129,7 @@ class ActivityLog extends Model
      */
     public function toTimelineArray(): array
     {
-        $at = $this->created_at ? $this->created_at->translatedFormat('d M Y, H.i').' WIB' : '-';
+        $at = $this->created_at ? $this->created_at->copy()->timezone('Asia/Jakarta')->translatedFormat('d M Y, H.i').' WIB' : '-';
 
         return [
             'id' => $this->id,
