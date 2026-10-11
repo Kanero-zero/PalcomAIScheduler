@@ -46,6 +46,8 @@ beforeEach(function () {
         '--force' => true,
     ]);
 
+    DB::connection('sqlite_file')->statement('PRAGMA journal_mode = WAL;');
+
     // Arahkan default connection aplikasi ke sqlite_file
     Config::set('database.default', 'sqlite_file');
     DB::setDefaultConnection('sqlite_file');
@@ -309,7 +311,7 @@ config(['database.connections.sqlite_worker' => [
     'database' => '{$sqlitePath}',
     'prefix' => '',
     'foreign_key_constraints' => true,
-    'busy_timeout' => 2000,
+    'busy_timeout' => 10000,
 ]]);
 
 auth()->login(\App\Models\User::where('email', 'admin@palcomtech.ac.id')->firstOrFail());

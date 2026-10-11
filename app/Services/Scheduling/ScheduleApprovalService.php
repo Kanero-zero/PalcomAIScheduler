@@ -188,7 +188,7 @@ class ScheduleApprovalService
                     ],
                 ];
             }, 3);
-        } catch (QueryException $e) {
+        } catch (\PDOException|QueryException $e) {
             $this->handleConcurrencyQueryException($e);
         }
     }
@@ -295,17 +295,17 @@ class ScheduleApprovalService
                     ],
                 ];
             }, 3);
-        } catch (QueryException $e) {
+        } catch (\PDOException|QueryException $e) {
             $this->handleConcurrencyQueryException($e);
         }
     }
 
     /**
-     * Menangani QueryException akibat race condition atau penguncian SQLite.
+     * Menangani QueryException atau PDOException akibat race condition atau penguncian SQLite.
      *
-     * @throws ValidationException|QueryException
+     * @throws ValidationException|QueryException|\PDOException
      */
-    protected function handleConcurrencyQueryException(QueryException $e): never
+    protected function handleConcurrencyQueryException(\Throwable $e): never
     {
         $message = strtolower($e->getMessage());
 
