@@ -53,12 +53,24 @@ class ActivityLogService
             return null;
         }
 
-        // Hitung fingerprint berdasarkan status dan snapshot kelas terdampak
+        // Hitung fingerprint berdasarkan status, kandidat terbaik, dan kondisi ruangan kelas terdampak
         $scheduleSnapshots = array_map(function ($s) {
             $candidateId = $s->bestCandidate?->instructorId ?? 'none';
-            $roomStatus = $s->roomEvaluation?->status ?? 'none';
+            $roomSnapshot = $s->roomEvaluation
+                ? sprintf(
+                    'r:%d:v%d:u%d:req%d:cap%d:avail%d:conf%d:alt%s',
+                    $s->roomEvaluation->roomId,
+                    $s->roomEvaluation->isValid ? 1 : 0,
+                    $s->roomEvaluation->hasUsableRoom() ? 1 : 0,
+                    $s->roomEvaluation->requiresRoomChange ? 1 : 0,
+                    $s->roomEvaluation->isCapacitySufficient ? 1 : 0,
+                    $s->roomEvaluation->isStatusAvailable ? 1 : 0,
+                    $s->roomEvaluation->hasRoomConflict ? 1 : 0,
+                    $s->roomEvaluation->suggestedAlternativeRoom?->roomId ?? 'none',
+                )
+                : 'r:none';
 
-            return "{$s->scheduleId}:{$s->status}:{$candidateId}:{$roomStatus}";
+            return "{$s->scheduleId}:{$s->status}:{$candidateId}:{$roomSnapshot}";
         }, $result->affectedSchedules);
         sort($scheduleSnapshots);
 

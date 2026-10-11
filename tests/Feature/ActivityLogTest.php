@@ -157,6 +157,57 @@ test('evaluasi identik tidak membuat duplikasi log engine yang tidak diperlukan'
     expect($afterDataChangedCount)->toBe(2);
 });
 
+test('perubahan kondisi ruangan menghasilkan fingerprint berbeda pada log engine tanpa membuat duplikat saat identik', function () {
+    $leave = InstructorLeave::create([
+        'instructor_id' => $this->wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '17:00',
+        'status' => 'pending',
+    ]);
+
+    $schedule = Schedule::create([
+        'course_class_id' => $this->courseClass->id,
+        'instructor_id' => $this->wahyu->id,
+        'room_id' => $this->room->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'scheduled',
+    ]);
+
+    // Evaluasi 1: Ruangan available
+    $this->schedulingEngine->evaluateLeave($leave);
+    $initialLog = ActivityLog::where('type', 'engine')
+        ->where('instructor_leave_id', $leave->id)
+        ->latest('id')
+        ->first();
+
+    expect(ActivityLog::where('type', 'engine')->where('instructor_leave_id', $leave->id)->count())->toBe(1);
+
+    // Evaluasi ulang saat kondisi identik: tidak boleh membuat duplikat
+    $this->schedulingEngine->evaluateLeave($leave);
+    expect(ActivityLog::where('type', 'engine')->where('instructor_leave_id', $leave->id)->count())->toBe(1);
+
+    // Ubah kondisi ruangan: Ruangan menjadi maintenance (isStatusAvailable berubah)
+    $this->room->update(['status' => 'maintenance']);
+
+    // Evaluasi 2: Kondisi ruangan berubah
+    $this->schedulingEngine->evaluateLeave($leave);
+    $updatedLog = ActivityLog::where('type', 'engine')
+        ->where('instructor_leave_id', $leave->id)
+        ->latest('id')
+        ->first();
+
+    expect(ActivityLog::where('type', 'engine')->where('instructor_leave_id', $leave->id)->count())->toBe(2)
+        ->and($updatedLog->id)->not->toBe($initialLog->id)
+        ->and($updatedLog->fingerprint)->not->toBe($initialLog->fingerprint);
+
+    // Evaluasi ulang kondisi baru yang sudah tercatat: tidak boleh membuat duplikat lagi
+    $this->schedulingEngine->evaluateLeave($leave);
+    expect(ActivityLog::where('type', 'engine')->where('instructor_leave_id', $leave->id)->count())->toBe(2);
+});
+
 test('aktivitas persetujuan dan perubahan jadwal dicatat dengan identitas admin dan referensi jadwal', function () {
     $this->actingAs($this->admin);
 
