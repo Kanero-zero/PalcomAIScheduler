@@ -46,6 +46,8 @@ beforeEach(function () {
         '--force' => true,
     ]);
 
+    DB::connection('sqlite_file')->statement('PRAGMA journal_mode = WAL;');
+
     // Arahkan default connection aplikasi ke sqlite_file
     Config::set('database.default', 'sqlite_file');
     DB::setDefaultConnection('sqlite_file');
