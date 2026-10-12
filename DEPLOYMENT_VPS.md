@@ -1,6 +1,6 @@
 # Panduan Teknis Deployment VPS & Operasional: PALCOM AI Scheduler
 
-Dokumen ini merupakan panduan resmi arsitektur deployment VPS (Virtual Private Server), konfigurasi server web, pengamanan rahasia, integritas database, dan prosedur pemulihan bencana (*disaster recovery*) untuk aplikasi **PALCOM AI Scheduler** (Laravel 13, PHP 8.4, Livewire 4, Flux UI, SQLite / MySQL).
+Dokumen ini merupakan panduan resmi arsitektur deployment VPS (Virtual Private Server), konfigurasi server web, pengamanan rahasia, integritas database, dan prosedur pemulihan bencana (*disaster recovery*) untuk aplikasi **PALCOM AI Scheduler** (Laravel 13, PHP 8.3, Livewire 4, Flux UI, SQLite / MySQL).
 
 ---
 
@@ -15,8 +15,8 @@ Dokumen ini merupakan panduan resmi arsitektur deployment VPS (Virtual Private S
 
 ### B. Paket Perangkat Lunak Utama
 1. **Web Server:** Nginx 1.24+
-2. **PHP Runtime:** PHP 8.4-FPM
-   - Ekstensi wajib: `php8.4-cli`, `php8.4-fpm`, `php8.4-common`, `php8.4-sqlite3` (atau `php8.4-mysql`), `php8.4-mbstring`, `php8.4-xml`, `php8.4-curl`, `php8.4-zip`, `php8.4-bcmath`, `php8.4-intl`, `php8.4-pcntl`
+2. **PHP Runtime:** PHP 8.3-FPM
+   - Ekstensi wajib: `php8.3-cli`, `php8.3-fpm`, `php8.3-common`, `php8.3-sqlite3` (atau `php8.3-mysql`), `php8.3-mbstring`, `php8.3-xml`, `php8.3-curl`, `php8.3-zip`, `php8.3-bcmath`, `php8.3-intl`, `php8.3-pcntl`
 3. **Dependency Managers:**
    - Composer 2.7+
    - Node.js 20.x LTS / 22.x LTS & npm 10+
@@ -27,28 +27,29 @@ Dokumen ini merupakan panduan resmi arsitektur deployment VPS (Virtual Private S
 
 ## 2. Struktur Direktori & Alur Rilis (*Release Architecture*)
 
-Direktori root aplikasi disarankan berada pada:
+Direktori root aplikasi berada pada:
 ```
-/var/www/palcom-ai-scheduler/
+/var/www/PalcomAIScheduler/
 ```
 
 ### Hak Akses & Kepemilikan (*Ownership & Permissions*)
 ```bash
 # Set pemilik direktori ke user deployment dan web server (www-data)
-sudo chown -R $USER:www-data /var/www/palcom-ai-scheduler
+sudo chown -R $USER:www-data /var/www/PalcomAIScheduler
 
 # Berikan izin tulis untuk storage dan cache ke grup web server
-sudo chmod -R 775 /var/www/palcom-ai-scheduler/storage
-sudo chmod -R 775 /var/www/palcom-ai-scheduler/bootstrap/cache
-sudo chmod -R 775 /var/www/palcom-ai-scheduler/database
+sudo chmod -R 775 /var/www/PalcomAIScheduler/storage
+sudo chmod -R 775 /var/www/PalcomAIScheduler/bootstrap/cache
+sudo chmod -R 775 /var/www/PalcomAIScheduler/database
 ```
 
-Jika menggunakan SQLite, pastikan file database dan folder `database/` memiliki izin tulis grup:
+Jika menggunakan SQLite, letakkan file database di luar web root pada `/var/lib/palcom-ai-scheduler/database.sqlite` demi keamanan dan ketahanan data:
 ```bash
-touch /var/www/palcom-ai-scheduler/database/database.sqlite
-sudo chown -R www-data:www-data /var/www/palcom-ai-scheduler/database
-sudo chmod 775 /var/www/palcom-ai-scheduler/database
-sudo chmod 664 /var/www/palcom-ai-scheduler/database/database.sqlite
+sudo mkdir -p /var/lib/palcom-ai-scheduler
+sudo touch /var/lib/palcom-ai-scheduler/database.sqlite
+sudo chown -R www-data:www-data /var/lib/palcom-ai-scheduler
+sudo chmod 775 /var/lib/palcom-ai-scheduler
+sudo chmod 664 /var/lib/palcom-ai-scheduler/database.sqlite
 ```
 
 ---
@@ -105,7 +106,7 @@ LOG_DEPRECATIONS_CHANNEL=null
 
 # Database: SQLite Production (Direkomendasikan WAL Mode)
 DB_CONNECTION=sqlite
-DB_DATABASE=/var/www/palcom-ai-scheduler/database/database.sqlite
+DB_DATABASE=/var/lib/palcom-ai-scheduler/database.sqlite
 DB_FOREIGN_KEYS=true
 
 # Cache & Session
@@ -178,14 +179,14 @@ Pasang cron job backup harian:
 crontab -e
 
 # Tambahkan backup otomatis setiap hari jam 02:00 dini hari
-0 2 * * * /bin/bash /var/www/palcom-ai-scheduler/deploy/scripts/backup-database.sh >> /var/log/scheduler-backup.log 2>&1
+0 2 * * * /bin/bash /var/www/PalcomAIScheduler/deploy/scripts/backup-database.sh >> /var/log/scheduler-backup.log 2>&1
 ```
 
 ### C. Skrip Pemulihan (*Disaster Recovery*)
 Skrip restore cepat tersedia di [`deploy/scripts/restore-database.sh`](deploy/scripts/restore-database.sh):
 ```bash
 # Menjalankan pemulihan dari arsip backup
-sudo bash deploy/scripts/restore-database.sh /var/backups/palcom-ai-scheduler/db_backup_20261011_020000.sqlite.gz
+sudo bash deploy/scripts/restore-database.sh /var/backups/palcom-ai-scheduler/scheduler_sqlite_20261011_020000.sqlite.gz
 ```
 
 ---
@@ -196,15 +197,15 @@ Skrip deployment produksi satu langkah tersedia di [`deploy/scripts/deploy.sh`](
 
 ```bash
 # Menjalankan deployment rilis baru
-cd /var/www/palcom-ai-scheduler
+cd /var/www/PalcomAIScheduler
 bash deploy/scripts/deploy.sh
 ```
 
 ### Tahapan yang Dijalankan oleh `deploy.sh`:
-1. **Pre-flight Check:** Memastikan PHP 8.4, Composer, dan Node.js tersedia.
+1. **Pre-flight Check:** Memastikan PHP 8.3, Composer, Node.js, dan Git tersedia.
 2. **Maintenance Mode:** Mengaktifkan maintenance mode ramah pengguna (`php artisan down --retry=60`).
-3. **Backup Otomatis:** Membuat snapshot database sebelum migrasi.
-4. **Git Pull:** Mengambil commit terbaru dari branch `main` secara fast-forward.
+3. **Backup Otomatis Wajib:** Membuat snapshot database sebelum migrasi. *Jika backup gagal, deployment langsung dibatalkan (exit 1).*
+4. **Git Pull Aman:** Mengambil commit terbaru dari branch target secara fast-forward (`git pull --ff-only origin main`) tanpa `git reset --hard`.
 5. **Composer Install:** Memasang paket PHP produksi (`composer install --no-dev --optimize-autoloader --no-interaction`).
 6. **Frontend Build:** Mengompilasi CSS & JS (`npm ci && npm run build`).
 7. **Database Migration:** Menjalankan migrasi baru (`php artisan migrate --force`).
@@ -213,7 +214,7 @@ bash deploy/scripts/deploy.sh
    - `php artisan route:cache`
    - `php artisan view:cache`
 9. **Queue Restart:** Memuat ulang antrean worker (`php artisan queue:restart`).
-10. **Permission Fix:** Menjamin file storage dan database dapat ditulis oleh `www-data`.
+10. **Permission Fix:** Menjamin file storage dan SQLite database di `/var/lib/palcom-ai-scheduler/database.sqlite` dapat ditulis oleh `www-data`.
 11. **Maintenance Mode Up:** Membuka kembali aplikasi (`php artisan up`).
 12. **Smoke Test:** Menjalankan verifikasi otomatis endpoint HTTP 200 via `deploy/scripts/smoke-test.sh`.
 
@@ -223,16 +224,18 @@ bash deploy/scripts/deploy.sh
 
 Jika rilis mengalami kegagalan kritis setelah deploy:
 ```bash
-# Jalankan skrip rollback otomatis
+# Jalankan skrip rollback otomatis (opsional: sertakan commit target / tag release)
 bash deploy/scripts/rollback.sh
+# Atau rollback ke commit tertentu:
+bash deploy/scripts/rollback.sh <commit-sha-atau-tag>
 ```
 
 Langkah manual rollback:
 1. `php artisan down`
-2. `git reset --hard HEAD~1` (kembali ke commit stabil sebelumnya)
+2. `git checkout <commit-sebelumnya>` (kembali ke versi stabil)
 3. `composer install --no-dev --optimize-autoloader`
 4. `npm run build`
-5. Jika ada migrasi yang harus dibatalkan: `php artisan migrate:rollback --step=1 --force`
+5. Jika ada migrasi yang harus dibatalkan: `php artisan migrate:rollback --step=1 --force` atau pulihkan snapshot DB via `restore-database.sh`.
 6. `php artisan optimize:clear && php artisan optimize`
 7. `php artisan up`
 

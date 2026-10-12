@@ -5,7 +5,7 @@
 # ==============================================================================
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/var/www/palcom-ai-scheduler}"
+APP_DIR="${APP_DIR:-/var/www/PalcomAIScheduler}"
 BRANCH="${BRANCH:-main}"
 WEB_USER="www-data"
 
@@ -26,16 +26,33 @@ command -v git >/dev/null 2>&1 || { echo "[ERROR] git tidak ditemukan di PATH.";
 echo "[1/9] Mengaktifkan maintenance mode ramah pengguna..."
 php artisan down --retry=60 || true
 
-# 3. Buat backup database otomatis sebelum migrasi jika script backup tersedia
+# 3. Buat backup database otomatis sebelum migrasi (wajib sukses)
 if [ -f "deploy/scripts/backup-database.sh" ]; then
     echo "[2/9] Membuat snapshot cadangan database sebelum migrasi..."
-    bash deploy/scripts/backup-database.sh || echo "[WARN] Gagal membuat cadangan database otomatis, melanjutkan..."
+    if ! bash deploy/scripts/backup-database.sh; then
+        echo "[FATAL] Gagal membuat cadangan database otomatis! Deployment DIBATALKAN demi keamanan integritas data."
+        php artisan up || true
+        exit 1
+    fi
+else
+    echo "[FATAL] Skrip backup (deploy/scripts/backup-database.sh) tidak ditemukan! Deployment DIBATALKAN demi keamanan data."
+    php artisan up || true
+    exit 1
 fi
 
-# 4. Ambil commit terbaru dari branch target
+# 4. Ambil commit terbaru dari branch target secara aman (fast-forward only, tanpa git reset --hard)
 echo "[3/9] Mengambil perubahan kode terbaru dari origin/${BRANCH}..."
+if ! git diff-index --quiet HEAD --; then
+    echo "[FATAL] Working tree memiliki perubahan lokal yang belum di-commit! Deployment dibatalkan untuk mencegah kehilangan data."
+    php artisan up || true
+    exit 1
+fi
 git fetch origin "${BRANCH}"
-git reset --hard "origin/${BRANCH}"
+if ! git pull --ff-only origin "${BRANCH}"; then
+    echo "[FATAL] Gagal melakukan git pull --ff-only! Terjadi divergensi branch lokal dan remote. Deployment dibatalkan."
+    php artisan up || true
+    exit 1
+fi
 
 # 5. Pasang dependensi PHP produksi
 echo "[4/9] Memasang dependensi Composer (mode produksi)..."
@@ -60,12 +77,20 @@ php artisan view:cache --quiet
 # Muat ulang queue worker jika diaktifkan
 php artisan queue:restart --quiet || true
 
-# 9. Pastikan hak akses direktori storage dan cache aman
+# 9. Pastikan hak akses direktori storage, cache, dan database aman
 echo "[8/9] Menyesuaikan kepemilikan dan hak akses file (permissions)..."
 chown -R "$USER":"$WEB_USER" .
-chmod -R 775 storage bootstrap/cache database
+chmod -R 775 storage bootstrap/cache
+[ -d "database" ] && chmod -R 775 database
 if [ -f "database/database.sqlite" ]; then
     chmod 664 database/database.sqlite
+fi
+DB_SQLITE_PATH="$(php artisan tinker --execute="echo config('database.connections.sqlite.database');" 2>/dev/null || echo "/var/lib/palcom-ai-scheduler/database.sqlite")"
+if [ -f "$DB_SQLITE_PATH" ]; then
+    chmod 664 "$DB_SQLITE_PATH" || true
+    chown "$WEB_USER":"$WEB_USER" "$DB_SQLITE_PATH" || true
+    chmod 775 "$(dirname "$DB_SQLITE_PATH")" || true
+    chown "$WEB_USER":"$WEB_USER" "$(dirname "$DB_SQLITE_PATH")" || true
 fi
 
 # 10. Matikan maintenance mode

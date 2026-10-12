@@ -17,7 +17,7 @@ echo "[BACKUP] Memulai pencadangan database pada ${TIMESTAMP}..."
 DB_CONN="$(php artisan tinker --execute="echo config('database.default');" 2>/dev/null || echo "sqlite")"
 
 if [ "$DB_CONN" = "sqlite" ]; then
-    DB_FILE="$(php artisan tinker --execute="echo config('database.connections.sqlite.database');" 2>/dev/null || echo "database/database.sqlite")"
+    DB_FILE="$(php artisan tinker --execute="echo config('database.connections.sqlite.database');" 2>/dev/null || echo "/var/lib/palcom-ai-scheduler/database.sqlite")"
 
     if [ -f "$DB_FILE" ]; then
         BACKUP_FILE="${BACKUP_DIR}/scheduler_sqlite_${TIMESTAMP}.sqlite"
@@ -30,7 +30,8 @@ if [ "$DB_CONN" = "sqlite" ]; then
         gzip -f "$BACKUP_FILE"
         echo "[BACKUP] Sukses: Database SQLite dicadangkan ke ${BACKUP_FILE}.gz"
     else
-        echo "[BACKUP WARN] File database SQLite tidak ditemukan pada ${DB_FILE}"
+        echo "[BACKUP ERROR] File database SQLite tidak ditemukan pada ${DB_FILE}"
+        exit 1
     fi
 
 elif [ "$DB_CONN" = "mysql" ]; then

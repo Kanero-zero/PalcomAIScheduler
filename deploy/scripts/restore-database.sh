@@ -36,12 +36,15 @@ php artisan down || true
 DB_CONN="$(php artisan tinker --execute="echo config('database.default');" 2>/dev/null || echo "sqlite")"
 
 if [ "$DB_CONN" = "sqlite" ]; then
-    DB_FILE="$(php artisan tinker --execute="echo config('database.connections.sqlite.database');" 2>/dev/null || echo "database/database.sqlite")"
+    DB_FILE="$(php artisan tinker --execute="echo config('database.connections.sqlite.database');" 2>/dev/null || echo "/var/lib/palcom-ai-scheduler/database.sqlite")"
 
     echo "[RESTORE] Memulihkan SQLite database ke ${DB_FILE}..."
+    mkdir -p "$(dirname "$DB_FILE")"
     gunzip -c "$BACKUP_FILE" > "$DB_FILE"
     chmod 664 "$DB_FILE"
-    chown www-data:www-data "$DB_FILE"
+    chown www-data:www-data "$DB_FILE" || true
+    chmod 775 "$(dirname "$DB_FILE")"
+    chown www-data:www-data "$(dirname "$DB_FILE")" || true
     echo "[RESTORE] Sukses memulihkan database SQLite."
 
 elif [ "$DB_CONN" = "mysql" ]; then
