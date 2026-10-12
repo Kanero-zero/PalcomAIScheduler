@@ -162,3 +162,20 @@ test('perintah demo diblokir secara ketat pada lingkungan production', function 
     $exitCode = Artisan::call('scheduler:demo-data');
     expect($exitCode)->toBe(1); // Gagal dengan peringatan keamanan
 });
+
+test('perintah demo dapat dijalankan di production khusus showcase jika ALLOW_DEMO_DATA=true dan flag --force-demo diberikan', function () {
+    App::detectEnvironment(fn () => 'production');
+    putenv('ALLOW_DEMO_DATA=true');
+    $_ENV['ALLOW_DEMO_DATA'] = 'true';
+
+    try {
+        $exitCode = Artisan::call('scheduler:demo-data', ['--force-demo' => true]);
+        expect($exitCode)->toBe(0);
+
+        $demoLeavesCount = InstructorLeave::where('reason', 'like', '%'.DemoScenarioSeeder::DEMO_PREFIX.'%')->count();
+        expect($demoLeavesCount)->toBeGreaterThanOrEqual(1);
+    } finally {
+        putenv('ALLOW_DEMO_DATA');
+        unset($_ENV['ALLOW_DEMO_DATA']);
+    }
+});

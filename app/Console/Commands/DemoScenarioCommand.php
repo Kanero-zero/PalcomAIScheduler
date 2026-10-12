@@ -12,7 +12,7 @@ class DemoScenarioCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'scheduler:demo-data {--clean : Bersihkan data demo secara aman tanpa menyentuh data operasional}';
+    protected $signature = 'scheduler:demo-data {--clean : Bersihkan data demo secara aman tanpa menyentuh data operasional} {--force-demo : Izinkan eksekusi khusus showcase jika ALLOW_DEMO_DATA=true diaktifkan di .env}';
 
     /**
      * The console command description.
@@ -27,9 +27,15 @@ class DemoScenarioCommand extends Command
     public function handle(): int
     {
         if (app()->environment('production')) {
-            $this->error('PERINGATAN: Perintah penyedia data demo DILARANG dijalankan di lingkungan produksi demi keamanan data!');
+            $allowDemo = (bool) env('ALLOW_DEMO_DATA', false);
+            if (! $this->option('force-demo') || ! $allowDemo) {
+                $this->error('PERINGATAN: Perintah penyedia data demo DILARANG dijalankan di lingkungan produksi demi keamanan data!');
+                $this->line('<fg=yellow>Petunjuk: Untuk instance demo publik terisolasi, aktifkan ALLOW_DEMO_DATA=true pada .env dan sertakan opsi --force-demo.</>');
 
-            return self::FAILURE;
+                return self::FAILURE;
+            }
+
+            $this->warn('Perhatian: Menjalankan data demo pada mode showcase publik dengan pengamanan ganda (ALLOW_DEMO_DATA=true dan --force-demo).');
         }
 
         if ($this->option('clean')) {

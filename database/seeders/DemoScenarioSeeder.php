@@ -24,7 +24,7 @@ class DemoScenarioSeeder extends Seeder
      */
     public function run(): void
     {
-        if (app()->environment('production')) {
+        if (app()->environment('production') && ! (bool) env('ALLOW_DEMO_DATA', false)) {
             $this->command?->error('Pemberitahuan Keamanan: DemoScenarioSeeder dilarang dijalankan di lingkungan produksi!');
 
             return;
