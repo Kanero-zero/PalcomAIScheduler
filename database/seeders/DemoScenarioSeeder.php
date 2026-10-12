@@ -12,6 +12,8 @@ use App\Models\ScheduleSubstitution;
 use App\Models\User;
 use App\Services\ActivityLog\ActivityLogService;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class DemoScenarioSeeder extends Seeder
 {
@@ -35,45 +37,48 @@ class DemoScenarioSeeder extends Seeder
 
         $this->command?->info('Menyiapkan Data Skenario Demonstrasi & Pengujian PALCOM AI Scheduler...');
 
-        // 1. Pastikan Pengguna Admin Demo Tersedia
-        $admin = User::firstOrCreate(
-            ['email' => 'admin@palcomtech.ac.id'],
-            [
+        // 1. Pastikan Pengguna Admin Tersedia tanpa hardcoded default password
+        $adminEmail = config('auth.admin_emails.0', 'admin@palcomtech.ac.id');
+        $admin = User::firstWhere('email', $adminEmail);
+
+        if (! $admin) {
+            $admin = User::create([
                 'name' => 'Admin BAAK PalComTech',
-                'password' => bcrypt('password'),
+                'email' => $adminEmail,
+                'password' => Hash::make(env('DEMO_ADMIN_PASSWORD', Str::random(32))),
                 'email_verified_at' => now(),
-            ]
-        );
+            ]);
+        }
 
-        // 2. Siapkan Instruktur Master (Idempotent updateOrCreate)
-        $wahyu = Instructor::updateOrCreate(['name' => 'Wahyu'], ['status' => 'active']);
-        $kanero = Instructor::updateOrCreate(['name' => 'Kanero'], ['status' => 'active']);
-        $dina = Instructor::updateOrCreate(['name' => 'Dina Oktavia'], ['status' => 'active']);
-        $budi = Instructor::updateOrCreate(['name' => 'Budi Santoso'], ['status' => 'active']);
-        $rizky = Instructor::updateOrCreate(['name' => 'Rizky Pratama'], ['status' => 'active']);
+        // 2. Siapkan Instruktur Master (firstOrCreate: tidak mengubah master data yang sudah ada)
+        $wahyu = Instructor::firstOrCreate(['name' => 'Wahyu'], ['status' => 'active']);
+        $kanero = Instructor::firstOrCreate(['name' => 'Kanero'], ['status' => 'active']);
+        $dina = Instructor::firstOrCreate(['name' => 'Dina Oktavia'], ['status' => 'active']);
+        $budi = Instructor::firstOrCreate(['name' => 'Budi Santoso'], ['status' => 'active']);
+        $rizky = Instructor::firstOrCreate(['name' => 'Rizky Pratama'], ['status' => 'active']);
 
-        // 3. Siapkan Kualifikasi / Skill Instruktur
+        // 3. Siapkan Kualifikasi / Skill Instruktur (firstOrCreate: tidak menimpa level skill yang sudah ada)
         // Kanero: Ahli Excel & Word (Kandidat Valid Skenario 2)
-        $kanero->skills()->updateOrCreate(['skill' => 'Microsoft Excel'], ['level' => 'advanced']);
-        $kanero->skills()->updateOrCreate(['skill' => 'Microsoft Word'], ['level' => 'advanced']);
+        $kanero->skills()->firstOrCreate(['skill' => 'Microsoft Excel'], ['level' => 'advanced']);
+        $kanero->skills()->firstOrCreate(['skill' => 'Microsoft Word'], ['level' => 'advanced']);
 
         // Dina: Hanya Desain Grafis (Tidak Memenuhi Kompetensi Skenario 3)
-        $dina->skills()->updateOrCreate(['skill' => 'Desain Grafis'], ['level' => 'advanced']);
+        $dina->skills()->firstOrCreate(['skill' => 'Desain Grafis'], ['level' => 'advanced']);
 
         // Budi: Punya skill Excel (namun akan dibuat bentrok di Skenario 4)
-        $budi->skills()->updateOrCreate(['skill' => 'Microsoft Excel'], ['level' => 'intermediate']);
+        $budi->skills()->firstOrCreate(['skill' => 'Microsoft Excel'], ['level' => 'intermediate']);
 
         // Wahyu: Excel, Word, Web
-        $wahyu->skills()->updateOrCreate(['skill' => 'Microsoft Excel'], ['level' => 'advanced']);
-        $wahyu->skills()->updateOrCreate(['skill' => 'Microsoft Word'], ['level' => 'advanced']);
-        $wahyu->skills()->updateOrCreate(['skill' => 'Pemrograman Web'], ['level' => 'advanced']);
+        $wahyu->skills()->firstOrCreate(['skill' => 'Microsoft Excel'], ['level' => 'advanced']);
+        $wahyu->skills()->firstOrCreate(['skill' => 'Microsoft Word'], ['level' => 'advanced']);
+        $wahyu->skills()->firstOrCreate(['skill' => 'Pemrograman Web'], ['level' => 'advanced']);
 
-        // 4. Siapkan Ruangan
-        $lab1 = Room::updateOrCreate(
+        // 4. Siapkan Ruangan (firstOrCreate: menjaga kapasitas dan status ruangan operasional asli)
+        $lab1 = Room::firstOrCreate(
             ['name' => 'Lab 1'],
             ['capacity' => 35, 'status' => 'available']
         );
-        $lab2 = Room::updateOrCreate(
+        $lab2 = Room::firstOrCreate(
             ['name' => 'Lab 2'],
             ['capacity' => 30, 'status' => 'available']
         );
@@ -353,21 +358,21 @@ class DemoScenarioSeeder extends Seeder
         $prefix = self::DEMO_PREFIX;
 
         // 1. Hapus substitusi dan activity log yang terkait dengan pengajuan izin demo
-        $demoLeaveIds = InstructorLeave::where('reason', 'like', "%{$prefix}%")
-            ->orWhereDate('date', self::DEMO_DATE)
-            ->pluck('id');
+        $demoLeaveIds = InstructorLeave::where('reason', 'like', "%{$prefix}%")->pluck('id');
 
         ActivityLog::whereIn('instructor_leave_id', $demoLeaveIds)
             ->orWhere('description', 'like', "%{$prefix}%")
+            ->orWhere('subject', 'like', "%{$prefix}%")
             ->delete();
 
-        ScheduleSubstitution::whereIn('instructor_leave_id', $demoLeaveIds)->delete();
+        ScheduleSubstitution::whereIn('instructor_leave_id', $demoLeaveIds)
+            ->orWhere('notes', 'like', "%{$prefix}%")
+            ->orWhere('rejection_reason', 'like', "%{$prefix}%")
+            ->delete();
 
-        // 2. Hapus jadwal demo
+        // 2. Hapus jadwal demo yang terikat pada kelas demo
         $demoClassIds = CourseClass::where('name', 'like', "%{$prefix}%")->pluck('id');
-        Schedule::whereIn('course_class_id', $demoClassIds)
-            ->orWhereDate('date', self::DEMO_DATE)
-            ->delete();
+        Schedule::whereIn('course_class_id', $demoClassIds)->delete();
 
         // 3. Hapus kelas demo
         CourseClass::where('name', 'like', "%{$prefix}%")->delete();

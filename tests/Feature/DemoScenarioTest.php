@@ -7,6 +7,7 @@ use App\Models\InstructorLeave;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\ScheduleSubstitution;
+use App\Models\User;
 use App\Services\Scheduling\SchedulingEngine;
 use Database\Seeders\DemoScenarioSeeder;
 use Illuminate\Support\Facades\App;
@@ -177,5 +178,84 @@ test('perintah demo dapat dijalankan di production khusus showcase jika ALLOW_DE
     } finally {
         putenv('ALLOW_DEMO_DATA');
         unset($_ENV['ALLOW_DEMO_DATA']);
+    }
+});
+
+test('opsi clean tidak menghapus jadwal dan izin operasional asli pada tanggal demo', function () {
+    $realInstructor = Instructor::create(['name' => 'Instruktur Tetap Kampus', 'status' => 'active']);
+    $realClass = CourseClass::create(['name' => 'Kelas Asli Mahasiswa', 'subject' => 'Basis Data', 'student_count' => 20]);
+    $realRoom = Room::create(['name' => 'Lab Komputer 5', 'capacity' => 25, 'status' => 'available']);
+
+    // Buat jadwal dan izin operasional NYATA pada tanggal yang sama dengan demo (DemoScenarioSeeder::DEMO_DATE)
+    $realScheduleSameDate = Schedule::create([
+        'course_class_id' => $realClass->id,
+        'instructor_id' => $realInstructor->id,
+        'room_id' => $realRoom->id,
+        'date' => DemoScenarioSeeder::DEMO_DATE,
+        'start_time' => '07:00:00',
+        'end_time' => '09:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    $realLeaveSameDate = InstructorLeave::create([
+        'instructor_id' => $realInstructor->id,
+        'date' => DemoScenarioSeeder::DEMO_DATE,
+        'start_time' => '07:00:00',
+        'end_time' => '09:00:00',
+        'reason' => 'Izin Dinas Nyata Dosen',
+        'status' => 'approved',
+    ]);
+
+    // Jalankan setup demo dan cleanup demo
+    Artisan::call('scheduler:demo-data');
+    Artisan::call('scheduler:demo-data', ['--clean' => true]);
+
+    // Pastikan jadwal dan izin operasional pada tanggal demo TIDAK terhapus
+    expect(Schedule::find($realScheduleSameDate->id))->not->toBeNull()
+        ->and(InstructorLeave::find($realLeaveSameDate->id))->not->toBeNull();
+});
+
+test('seeder tidak menimpa password admin yang sudah ada dan tidak menggunakan password statis bawaan', function () {
+    $customHash = bcrypt('SuperSecretAdminPassword123!');
+    $admin = User::create([
+        'name' => 'Admin Tetap BAAK',
+        'email' => 'admin@palcomtech.ac.id',
+        'password' => $customHash,
+        'email_verified_at' => now(),
+    ]);
+
+    Artisan::call('scheduler:demo-data');
+
+    $admin->refresh();
+    expect($admin->password)->toBe($customHash);
+});
+
+test('seeder tidak mengubah kapasitas atau data master ruangan yang sudah ada', function () {
+    $existingRoom = Room::create([
+        'name' => 'Lab 1',
+        'capacity' => 99,
+        'status' => 'available',
+    ]);
+
+    Artisan::call('scheduler:demo-data');
+
+    $existingRoom->refresh();
+    expect($existingRoom->capacity)->toBe(99);
+});
+
+test('perintah demo dapat berjalan pada database terisolasi menggunakan opsi --isolated', function () {
+    $isolatedDbPath = database_path('demo.sqlite');
+    if (file_exists($isolatedDbPath)) {
+        @unlink($isolatedDbPath);
+    }
+
+    try {
+        $exitCode = Artisan::call('scheduler:demo-data', ['--isolated' => true]);
+        expect($exitCode)->toBe(0)
+            ->and(file_exists($isolatedDbPath))->toBeTrue();
+    } finally {
+        if (file_exists($isolatedDbPath)) {
+            @unlink($isolatedDbPath);
+        }
     }
 });

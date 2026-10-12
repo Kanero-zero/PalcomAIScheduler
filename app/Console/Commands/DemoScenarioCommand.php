@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use Database\Seeders\DemoScenarioSeeder;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 
 class DemoScenarioCommand extends Command
 {
@@ -12,7 +13,7 @@ class DemoScenarioCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'scheduler:demo-data {--clean : Bersihkan data demo secara aman tanpa menyentuh data operasional} {--force-demo : Izinkan eksekusi khusus showcase jika ALLOW_DEMO_DATA=true diaktifkan di .env}';
+    protected $signature = 'scheduler:demo-data {--clean : Bersihkan data demo secara aman tanpa menyentuh data operasional} {--force-demo : Izinkan eksekusi khusus showcase jika ALLOW_DEMO_DATA=true diaktifkan di .env} {--isolated : Gunakan database SQLite terisolasi khusus demo (database/demo.sqlite)} {--database= : Gunakan nama koneksi database tertentu}';
 
     /**
      * The console command description.
@@ -36,6 +37,32 @@ class DemoScenarioCommand extends Command
             }
 
             $this->warn('Perhatian: Menjalankan data demo pada mode showcase publik dengan pengamanan ganda (ALLOW_DEMO_DATA=true dan --force-demo).');
+        }
+
+        $connection = $this->option('database');
+
+        if ($this->option('isolated')) {
+            $isolatedDbPath = database_path('demo.sqlite');
+            if (! file_exists($isolatedDbPath)) {
+                touch($isolatedDbPath);
+            }
+
+            config(['database.connections.demo_isolated' => [
+                'driver' => 'sqlite',
+                'database' => $isolatedDbPath,
+                'prefix' => '',
+                'foreign_key_constraints' => true,
+            ]]);
+
+            $connection = 'demo_isolated';
+            $this->call('migrate', ['--database' => 'demo_isolated', '--force' => true]);
+            $this->info("Database terisolasi siap: {$isolatedDbPath}");
+        }
+
+        if ($connection) {
+            config(['database.default' => $connection]);
+            DB::purge($connection);
+            DB::setDefaultConnection($connection);
         }
 
         if ($this->option('clean')) {
