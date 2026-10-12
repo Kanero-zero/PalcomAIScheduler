@@ -128,12 +128,33 @@ GEMINI_REQUEST_TIMEOUT=15
 
 # Admin Whitelist
 ADMIN_EMAILS=admin@palcomtech.ac.id
+
+# Showcase Demo Mode (Opsional untuk instance demo publik juri lomba)
+# Nilai default false demi keamanan produksi. Setel true HANYA jika server ini adalah server showcase demo.
+ALLOW_DEMO_DATA=false
 ```
 
 ### B. Zero-Leakage Checklist
 - [x] Pastikan `APP_DEBUG=false` untuk mencegah kebocoran stack trace dan kredensial database saat terjadi unhandled exception.
 - [x] Pastikan `GEMINI_API_KEY` hanya disetel pada `.env` server atau injected secrets CI/CD; dilarang keras ditulis di kode atau di-commit ke repositori.
 - [x] Sesi cookie disetel `SESSION_SECURE_COOKIE=true` agar hanya dikirim melalui koneksi HTTPS.
+
+### C. Menjalankan Data Demo pada Showcase Publik (Proteksi Ganda)
+Untuk kebutuhan penilaian juri pada website publik:
+1. Secara default, `php artisan scheduler:demo-data` diblokir total pada `APP_ENV=production`.
+2. Jika server VPS difungsikan sebagai instance showcase demo publik, setel di `.env`:
+   ```ini
+   ALLOW_DEMO_DATA=true
+   ```
+3. Eksekusi data demo dengan flag konfirmasi eksplisit:
+   ```bash
+   php artisan scheduler:demo-data --force-demo
+   ```
+4. Reset atau pembersihan data demo kapan saja:
+   ```bash
+   php artisan scheduler:demo-data --clean --force-demo
+   ```
+*(Seluruh 9 skenario demo diisolasi dengan tag `[DEMO]` dan tanggal referensi `2026-10-25`, tanpa menggunakan `migrate:fresh`).*
 
 ---
 
