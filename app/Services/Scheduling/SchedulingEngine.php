@@ -7,6 +7,7 @@ use App\Models\InstructorLeave;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\ScheduleSubstitution;
+use App\Models\User;
 use App\Services\ActivityLog\ActivityLogService;
 use App\Services\Scheduling\DTOs\CandidateEvaluation;
 use App\Services\Scheduling\DTOs\RoomEvaluation;
@@ -49,14 +50,14 @@ class SchedulingEngine
     /**
      * Evaluate leave deterministically and enhance recommendations with Google Gemini AI.
      */
-    public function evaluateWithAi(InstructorLeave $leave): SchedulingResult
+    public function evaluateWithAi(InstructorLeave $leave, ?User $actor = null): SchedulingResult
     {
         $deterministicResult = $this->evaluateLeave($leave);
 
         $enhancedResult = app(GeminiSchedulingAdvisor::class)->enhanceEvaluation($deterministicResult);
 
         if ($enhancedResult->aiSummary) {
-            app(ActivityLogService::class)->logAiRecommendation($enhancedResult, $enhancedResult->aiSummary);
+            app(ActivityLogService::class)->logAiRecommendation($enhancedResult, $enhancedResult->aiSummary, $actor);
         }
 
         return $enhancedResult;

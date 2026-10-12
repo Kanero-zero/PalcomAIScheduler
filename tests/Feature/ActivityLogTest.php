@@ -1,11 +1,13 @@
 <?php
 
+use App\Livewire\InstructorLeaveForm;
 use App\Models\ActivityLog;
 use App\Models\CourseClass;
 use App\Models\Instructor;
 use App\Models\InstructorLeave;
 use App\Models\Room;
 use App\Models\Schedule;
+use App\Models\ScheduleSubstitution;
 use App\Models\User;
 use App\Services\ActivityLog\ActivityLogService;
 use App\Services\Scheduling\DTOs\SchedulingResult;
@@ -14,6 +16,7 @@ use App\Services\Scheduling\SchedulingEngine;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
+use Livewire\Livewire;
 
 beforeEach(function () {
     $this->admin = User::create([
@@ -559,4 +562,239 @@ test('toTimelineArray mengonversi timestamp UTC ke zona waktu Asia/Jakarta sebel
 
     // 01:30 UTC + 7 jam = 08:30 WIB
     expect($array['at'])->toBe('15 Okt 2026, 08.30 WIB');
+});
+
+test('analyzeWithAi pada InstructorLeaveForm mencatat aktivitas AI ke Activity Log melalui service', function () {
+    $this->actingAs($this->admin);
+
+    $leave = InstructorLeave::create([
+        'instructor_id' => $this->wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'reason' => 'Izin keperluan keluarga',
+        'status' => 'pending',
+    ]);
+
+    Schedule::create([
+        'course_class_id' => $this->courseClass->id,
+        'instructor_id' => $this->wahyu->id,
+        'room_id' => $this->room->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'scheduled',
+    ]);
+
+    Http::fake([
+        'https://generativelanguage.googleapis.com/*' => Http::response([
+            'candidates' => [
+                [
+                    'content' => [
+                        'parts' => [
+                            [
+                                'text' => json_encode([
+                                    'summary_explanation' => 'Instruktur Kanero sangat cocok mengajar Microsoft Excel siang.',
+                                    'rankings' => [
+                                        [
+                                            'instructor_id' => $this->kanero->id,
+                                            'instructor_name' => 'Kanero',
+                                            'rank' => 1,
+                                            'confidence_score' => 95,
+                                            'ai_reasoning' => 'Memiliki skill advanced dan waktu kosong.',
+                                        ],
+                                    ],
+                                ]),
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ], 200),
+    ]);
+
+    $initialResult = $this->schedulingEngine->evaluateLeave($leave)->toArray();
+
+    $component = Livewire::test(InstructorLeaveForm::class)
+        ->set('submittedLeaveId', $leave->id)
+        ->set('schedulingResult', $initialResult)
+        ->call('analyzeWithAi');
+
+    $component->assertHasNoErrors();
+
+    // Verifikasi bahwa log bertipe 'ai' tercatat di tabel activity_logs
+    $aiLog = ActivityLog::where('type', 'ai')
+        ->where('instructor_leave_id', $leave->id)
+        ->first();
+
+    expect($aiLog)->not->toBeNull()
+        ->and($aiLog->state)->toBe('success')
+        ->and($aiLog->actor)->toBe('Gemini AI')
+        ->and($aiLog->user_id)->toBe($this->admin->id)
+        ->and($aiLog->metadata['status'])->toBe('success')
+        ->and($aiLog->metadata['confidence_score'])->toEqual(95);
+});
+
+test('penerapan minimisasi data menyaring informasi pribadi PII pada alasan izin notes dan rejection', function () {
+    $this->actingAs($this->admin);
+
+    // 1. Pengajuan izin dengan data sensitif: No HP, NIK, No RM medis, email
+    $rawReason = 'Sakit demam opname di RS no rm RM-123456 diagnosa demam berdarah hubungi 081234567890 NIK 1671012345678901 email wahyu@gmail.com';
+    $leave = InstructorLeave::create([
+        'instructor_id' => $this->wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '17:00',
+        'reason' => $rawReason,
+        'status' => 'pending',
+    ]);
+
+    $leaveLog = ActivityLog::where('type', 'leave')
+        ->where('instructor_leave_id', $leave->id)
+        ->firstOrFail();
+
+    $minimizedReason = $leaveLog->metadata['reason'];
+    expect($minimizedReason)->not->toContain('081234567890')
+        ->and($minimizedReason)->not->toContain('1671012345678901')
+        ->and($minimizedReason)->not->toContain('wahyu@gmail.com')
+        ->and($minimizedReason)->not->toContain('RM-123456')
+        ->and($minimizedReason)->toContain('[REDACTED_PHONE]')
+        ->and($minimizedReason)->toContain('[REDACTED_ID]')
+        ->and($minimizedReason)->toContain('[REDACTED_EMAIL]')
+        ->and($minimizedReason)->toContain('[REDACTED_MEDICAL_REF]');
+
+    // 2. Persetujuan dengan notes yang mengandung nomor HP dan NIK
+    $schedule = Schedule::create([
+        'course_class_id' => $this->courseClass->id,
+        'instructor_id' => $this->wahyu->id,
+        'room_id' => $this->room->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'scheduled',
+    ]);
+
+    $this->approvalService->approveSubstitution(
+        leaveId: $leave->id,
+        scheduleId: $schedule->id,
+        replacementInstructorId: $this->kanero->id,
+        notes: 'Disetujui. Koordinasi via WA 081987654321 atau kontak 1671029384756102',
+    );
+
+    $approvalLog = ActivityLog::where('type', 'approval')
+        ->where('schedule_id', $schedule->id)
+        ->firstOrFail();
+
+    expect($approvalLog->metadata['notes'])->not->toContain('081987654321')
+        ->and($approvalLog->metadata['notes'])->not->toContain('1671029384756102')
+        ->and($approvalLog->metadata['notes'])->toContain('[REDACTED_PHONE]')
+        ->and($approvalLog->metadata['notes'])->toContain('[REDACTED_ID]');
+
+    // 3. Penolakan dengan alasan yang memuat data kontak pribadi
+    $schedule2 = Schedule::create([
+        'course_class_id' => $this->courseClass->id,
+        'instructor_id' => $this->wahyu->id,
+        'room_id' => $this->room->id,
+        'date' => '2026-10-15',
+        'start_time' => '15:00',
+        'end_time' => '17:00',
+        'status' => 'scheduled',
+    ]);
+
+    $this->approvalService->rejectSubstitution(
+        leaveId: $leave->id,
+        scheduleId: $schedule2->id,
+        rejectionReason: 'Instruktur pengganti tidak bersedia dihubungi di nomor 085566778899 email info@kanero.com',
+    );
+
+    $rejectLog = ActivityLog::where('type', 'approval')
+        ->where('schedule_id', $schedule2->id)
+        ->firstOrFail();
+
+    expect($rejectLog->description)->not->toContain('085566778899')
+        ->and($rejectLog->description)->not->toContain('info@kanero.com')
+        ->and($rejectLog->metadata['rejection_reason'])->not->toContain('085566778899')
+        ->and($rejectLog->metadata['rejection_reason'])->not->toContain('info@kanero.com')
+        ->and($rejectLog->metadata['rejection_reason'])->toContain('[REDACTED_PHONE]')
+        ->and($rejectLog->metadata['rejection_reason'])->toContain('[REDACTED_EMAIL]');
+});
+
+test('deduplikasi log Scheduling Engine aman dari evaluasi paralel dan balapan konkurensi', function () {
+    $leave = InstructorLeave::create([
+        'instructor_id' => $this->wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'pending',
+    ]);
+
+    Schedule::create([
+        'course_class_id' => $this->courseClass->id,
+        'instructor_id' => $this->wahyu->id,
+        'room_id' => $this->room->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'scheduled',
+    ]);
+
+    // Jalankan 5 pemanggilan evaluasi beruntun / simultan
+    for ($i = 0; $i < 5; $i++) {
+        $this->schedulingEngine->evaluateLeave($leave);
+    }
+
+    // Hanya boleh ada tepat 1 log engine yang tercatat
+    $count = ActivityLog::where('type', 'engine')
+        ->where('instructor_leave_id', $leave->id)
+        ->count();
+
+    expect($count)->toBe(1);
+});
+
+test('rollback transaksi membatalkan log approval yang sempat tertulis jika kegagalan terjadi di tahap penulisan log berikutnya', function () {
+    $this->actingAs($this->admin);
+
+    $leave = InstructorLeave::create([
+        'instructor_id' => $this->wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'pending',
+    ]);
+
+    $schedule = Schedule::create([
+        'course_class_id' => $this->courseClass->id,
+        'instructor_id' => $this->wahyu->id,
+        'room_id' => $this->room->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'scheduled',
+    ]);
+
+    // Pasang hook saving pada ActivityLog:
+    // Jika log kedua (logScheduleUpdated dengan type 'schedule') hendak disimpan, lemparkan exception fatal
+    ActivityLog::saving(function ($log) {
+        if ($log->type === 'schedule') {
+            throw new RuntimeException('Simulasi kegagalan database pada penulisan log kedua.');
+        }
+    });
+
+    expect(fn () => $this->approvalService->approveSubstitution(
+        leaveId: $leave->id,
+        scheduleId: $schedule->id,
+        replacementInstructorId: $this->kanero->id,
+        notes: 'Persetujuan dengan simulasi error',
+    ))->toThrow(RuntimeException::class);
+
+    // BUKTI ATOMISITAS:
+    // Log pertama (logApproval bertipe 'approval') yang sempat dibuat sebelum exception
+    // WAJIB ter-rollback sepenuhnya bersama transaksi database
+    expect(ActivityLog::where('schedule_id', $schedule->id)->count())->toBe(0)
+        ->and(ActivityLog::where('type', 'approval')->where('schedule_id', $schedule->id)->exists())->toBeFalse()
+        ->and(ActivityLog::where('type', 'schedule')->where('schedule_id', $schedule->id)->exists())->toBeFalse();
+
+    // Data jadwal dan substitusi tidak termutasi
+    expect($schedule->fresh()->instructor_id)->toBe($this->wahyu->id);
+    expect(ScheduleSubstitution::where('schedule_id', $schedule->id)->exists())->toBeFalse();
 });

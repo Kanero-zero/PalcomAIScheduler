@@ -10,9 +10,45 @@ use App\Models\ScheduleSubstitution;
 use App\Models\User;
 use App\Services\Scheduling\DTOs\SchedulingResult;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 class ActivityLogService
 {
+    /**
+     * Minimalkan teks agar tidak mengekspos informasi pribadi (PII), detail medis spesifik, atau nomor kontak mentah.
+     */
+    public function minimizeText(?string $text, int $maxLength = 150): ?string
+    {
+        if ($text === null) {
+            return null;
+        }
+
+        $cleaned = trim(strip_tags($text));
+        if ($cleaned === '') {
+            return null;
+        }
+
+        // 1. Redaksi alamat email
+        $cleaned = (string) preg_replace('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/', '[REDACTED_EMAIL]', $cleaned);
+
+        // 2. Redaksi referensi rekam medis / diagnosa klinis spesifik
+        $cleaned = (string) preg_replace('/(?i)\b(?:no\.?\s*(?:rm|rekam\s*medis)|diagnosa|diagnosis)\s*[:=]?\s*[\w\d\-\/\.]+/u', '[REDACTED_MEDICAL_REF]', $cleaned);
+
+        // 3. Redaksi nomor telepon / ponsel (08xx, +62xx)
+        $cleaned = (string) preg_replace('/(?:\+?62|08)[0-9\-\.\s]{7,13}\b/', '[REDACTED_PHONE]', $cleaned);
+
+        // 4. Redaksi nomor identitas (NIK / KTP / No Rekening: 10-18 digit berurutan)
+        $cleaned = (string) preg_replace('/\b\d{10,18}\b/', '[REDACTED_ID]', $cleaned);
+
+        // 5. Potong teks jika melebihi batas panjang yang wajar untuk audit log ringkas
+        if (mb_strlen($cleaned) > $maxLength) {
+            $cleaned = mb_substr($cleaned, 0, $maxLength - 3).'...';
+        }
+
+        return $cleaned;
+    }
+
     /**
      * Catat aktivitas ketika pengajuan izin baru dibuat.
      */
@@ -38,7 +74,7 @@ class ActivityLogService
                 'date' => $leave->date?->format('Y-m-d'),
                 'start_time' => $leave->start_time,
                 'end_time' => $leave->end_time,
-                'reason' => $leave->reason,
+                'reason' => $this->minimizeText($leave->reason),
             ],
         ]);
     }
@@ -76,6 +112,37 @@ class ActivityLogService
 
         $fingerprint = sha1("engine:{$result->leaveId}:affected:{$result->totalAffectedSchedules}:resolved:{$result->totalResolvedSchedules}:snapshots:".implode('|', $scheduleSnapshots));
 
+        $title = $result->allSchedulesResolved
+            ? 'Kandidat pengganti ditemukan untuk semua kelas'
+            : ($result->totalResolvedSchedules > 0
+                ? 'Sebagian kandidat pengganti ditemukan'
+                : 'Pemeriksaan kandidat dan ruangan selesai');
+
+        $description = "Pemeriksaan kualifikasi kompetensi, ketersediaan, dan ruangan dijalankan. {$result->totalResolvedSchedules} dari {$result->totalAffectedSchedules} sesi kelas terdampak terselesaikan.";
+
+        $lockKey = "engine_eval_log_{$result->leaveId}_{$fingerprint}";
+
+        try {
+            return Cache::lock($lockKey, 10)->block(3, function () use ($result, $actor, $fingerprint, $title, $description) {
+                return $this->saveEngineEvaluationLogIfUnique($result, $actor, $fingerprint, $title, $description);
+            });
+        } catch (\Throwable) {
+            return DB::transaction(function () use ($result, $actor, $fingerprint, $title, $description) {
+                return $this->saveEngineEvaluationLogIfUnique($result, $actor, $fingerprint, $title, $description);
+            });
+        }
+    }
+
+    /**
+     * Simpan log hasil evaluasi engine jika belum ada log dengan fingerprint yang sama pada evaluasi terakhir atau jendela waktu aktif.
+     */
+    protected function saveEngineEvaluationLogIfUnique(
+        SchedulingResult $result,
+        ?User $actor,
+        string $fingerprint,
+        string $title,
+        string $description,
+    ): ?ActivityLog {
         // Cek log engine terakhir untuk leave_id ini. Jika fingerprint identik, jangan catat duplikat.
         $latestLog = ActivityLog::where('type', 'engine')
             ->where('instructor_leave_id', $result->leaveId)
@@ -86,13 +153,16 @@ class ActivityLogService
             return null;
         }
 
-        $title = $result->allSchedulesResolved
-            ? 'Kandidat pengganti ditemukan untuk semua kelas'
-            : ($result->totalResolvedSchedules > 0
-                ? 'Sebagian kandidat pengganti ditemukan'
-                : 'Pemeriksaan kandidat dan ruangan selesai');
+        // Cek apakah log dengan fingerprint identik sudah dibuat baru saja (mencegah race condition evaluasi paralel)
+        $alreadyLoggedRecently = ActivityLog::where('type', 'engine')
+            ->where('instructor_leave_id', $result->leaveId)
+            ->where('fingerprint', $fingerprint)
+            ->where('created_at', '>=', now()->subMinutes(5))
+            ->exists();
 
-        $description = "Pemeriksaan kualifikasi kompetensi, ketersediaan, dan ruangan dijalankan. {$result->totalResolvedSchedules} dari {$result->totalAffectedSchedules} sesi kelas terdampak terselesaikan.";
+        if ($alreadyLoggedRecently) {
+            return null;
+        }
 
         return ActivityLog::create([
             'user_id' => $actor?->id ?? auth()->id(),
@@ -205,18 +275,20 @@ class ActivityLogService
                 'replacement_instructor_id' => $substitution->replacement_instructor_id,
                 'replacement_instructor_name' => $replacementName,
                 'original_instructor_id' => $substitution->original_instructor_id,
-                'notes' => $substitution->notes,
+                'notes' => $this->minimizeText($substitution->notes),
             ],
         ]);
     }
 
     /**
      * Catat aktivitas penolakan rekomendasi pengganti oleh admin.
+     * Menerapkan minimisasi data pada alasan penolakan untuk mencegah kebocoran informasi pribadi (PII).
      */
     public function logRejection(ScheduleSubstitution $substitution, Schedule $schedule, string $rejectionReason, ?User $admin = null): ActivityLog
     {
         $adminUser = $admin ?? auth()->user();
         $className = $schedule->courseClass?->name ?? 'Kelas';
+        $minimizedReason = $this->minimizeText($rejectionReason) ?? 'Tidak ada alasan khusus yang disertakan.';
 
         return ActivityLog::create([
             'user_id' => $adminUser?->id,
@@ -224,14 +296,14 @@ class ActivityLogService
             'state' => 'rejected',
             'actor' => $adminUser?->name ?? 'Admin',
             'title' => 'Usulan pengganti ditolak',
-            'description' => "Admin menolak usulan pengganti untuk kelas {$className}. Alasan: {$rejectionReason}",
+            'description' => "Admin menolak usulan pengganti untuk kelas {$className}. Alasan: {$minimizedReason}",
             'subject' => "Pengajuan Izin #{$substitution->instructor_leave_id}",
             'instructor_leave_id' => $substitution->instructor_leave_id,
             'schedule_id' => $schedule->id,
             'metadata' => [
                 'substitution_id' => $substitution->id,
                 'schedule_id' => $schedule->id,
-                'rejection_reason' => $rejectionReason,
+                'rejection_reason' => $minimizedReason,
             ],
         ]);
     }
