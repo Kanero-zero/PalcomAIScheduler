@@ -59,48 +59,58 @@ class DemoScenarioCommand extends Command
             $this->info("Database terisolasi siap: {$isolatedDbPath}");
         }
 
-        if ($connection) {
-            config(['database.default' => $connection]);
-            DB::purge($connection);
-            DB::setDefaultConnection($connection);
-        }
+        $originalDefault = config('database.default');
 
-        if ($this->option('clean')) {
-            $this->warn('Membersihkan data skenario demonstrasi...');
-            $deletedCount = DemoScenarioSeeder::clean();
-            $this->info("Data demo berhasil dibersihkan secara aman ({$deletedCount} pengajuan izin demo beserta jadwal, substitusi, dan activity log terkait telah dihapus).");
-            $this->line('<fg=gray>Data operasional pengguna tetap aman dan tidak mengalami perubahan.</>');
+        try {
+            if ($connection) {
+                config(['database.default' => $connection]);
+                DB::purge($connection);
+                DB::setDefaultConnection($connection);
+            }
+
+            if ($this->option('clean')) {
+                $this->warn('Membersihkan data skenario demonstrasi...');
+                $deletedCount = DemoScenarioSeeder::clean();
+                $this->info("Data demo berhasil dibersihkan secara aman ({$deletedCount} pengajuan izin demo beserta jadwal, substitusi, dan activity log terkait telah dihapus).");
+                $this->line('<fg=gray>Data operasional pengguna tetap aman dan tidak mengalami perubahan.</>');
+
+                return self::SUCCESS;
+            }
+
+            $this->info('================================================================');
+            $this->info('     PENYIAP DATA SKENARIO DEMO — PALCOM AI SCHEDULER           ');
+            $this->info('================================================================');
+
+            $seeder = new DemoScenarioSeeder;
+            $seeder->setCommand($this);
+            $seeder->run();
+
+            $this->newLine();
+            $this->table(
+                ['No', 'Skenario', 'Deskripsi / Kondisi', 'Status Kesiapan'],
+                [
+                    ['1', 'Izin Banyak Kelas Terdampak', 'Wahyu izin (13:00 - 18:00) pada 2 kelas: Excel Bisnis & Word Administrasi', 'Tersedia'],
+                    ['2', 'Instruktur Pengganti Valid', 'Kanero memenuhi kualifikasi Advanced Excel & Word, jam mengajar kosong', 'Tersedia'],
+                    ['3', 'Kandidat Tidak Kompeten', 'Dina Oktavia hanya memiliki keahlian Desain Grafis (didiskualifikasi)', 'Tersedia'],
+                    ['4', 'Kandidat Bentrok Jadwal', 'Budi Santoso memiliki keahlian Excel namun sedang mengajar di Lab 2', 'Tersedia'],
+                    ['5', 'Kendala Ruangan', 'Kelas Web di Lab 3 Mini: kapasitas kurang (15 < 30) & status maintenance', 'Tersedia'],
+                    ['6', 'Izin Tanpa Kelas Terdampak', 'Rizky Pratama mengajukan izin namun tidak memiliki jadwal mengajar', 'Tersedia'],
+                    ['7', 'Approval Berhasil', 'Persetujuan Kanero untuk kelas Excel tercatat di substitusi & activity log', 'Tersedia'],
+                    ['8', 'Reject Beserta Alasan', 'Penolakan usulan pengganti dengan alasan beban SKS maksimum tercatat', 'Tersedia'],
+                    ['9', 'Gemini Fallback', 'Log simulasi fallback AI terintegrasi otomatis ke hasil deterministik', 'Tersedia'],
+                ]
+            );
+
+            $this->line('<fg=green>✓ Seluruh 9 skenario siap digunakan untuk presentasi juri maupun automated testing.</>');
+            $this->line('<fg=gray>Untuk membersihkan kembali data demo kapan saja: php artisan scheduler:demo-data --clean</>');
 
             return self::SUCCESS;
+        } finally {
+            if ($connection && $originalDefault) {
+                config(['database.default' => $originalDefault]);
+                DB::purge($connection);
+                DB::setDefaultConnection($originalDefault);
+            }
         }
-
-        $this->info('================================================================');
-        $this->info('     PENYIAP DATA SKENARIO DEMO — PALCOM AI SCHEDULER           ');
-        $this->info('================================================================');
-
-        $seeder = new DemoScenarioSeeder;
-        $seeder->setCommand($this);
-        $seeder->run();
-
-        $this->newLine();
-        $this->table(
-            ['No', 'Skenario', 'Deskripsi / Kondisi', 'Status Kesiapan'],
-            [
-                ['1', 'Izin Banyak Kelas Terdampak', 'Wahyu izin (13:00 - 18:00) pada 2 kelas: Excel Bisnis & Word Administrasi', 'Tersedia'],
-                ['2', 'Instruktur Pengganti Valid', 'Kanero memenuhi kualifikasi Advanced Excel & Word, jam mengajar kosong', 'Tersedia'],
-                ['3', 'Kandidat Tidak Kompeten', 'Dina Oktavia hanya memiliki keahlian Desain Grafis (didiskualifikasi)', 'Tersedia'],
-                ['4', 'Kandidat Bentrok Jadwal', 'Budi Santoso memiliki keahlian Excel namun sedang mengajar di Lab 2', 'Tersedia'],
-                ['5', 'Kendala Ruangan', 'Kelas Web di Lab 3 Mini: kapasitas kurang (15 < 30) & status maintenance', 'Tersedia'],
-                ['6', 'Izin Tanpa Kelas Terdampak', 'Rizky Pratama mengajukan izin namun tidak memiliki jadwal mengajar', 'Tersedia'],
-                ['7', 'Approval Berhasil', 'Persetujuan Kanero untuk kelas Excel tercatat di substitusi & activity log', 'Tersedia'],
-                ['8', 'Reject Beserta Alasan', 'Penolakan usulan pengganti dengan alasan beban SKS maksimum tercatat', 'Tersedia'],
-                ['9', 'Gemini Fallback', 'Log simulasi fallback AI terintegrasi otomatis ke hasil deterministik', 'Tersedia'],
-            ]
-        );
-
-        $this->line('<fg=green>✓ Seluruh 9 skenario siap digunakan untuk presentasi juri maupun automated testing.</>');
-        $this->line('<fg=gray>Untuk membersihkan kembali data demo kapan saja: php artisan scheduler:demo-data --clean</>');
-
-        return self::SUCCESS;
     }
 }

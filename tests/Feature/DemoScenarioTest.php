@@ -18,6 +18,13 @@ beforeEach(function () {
     $this->engine = app(SchedulingEngine::class);
 });
 
+afterEach(function () {
+    App::detectEnvironment(fn () => 'testing');
+    config(['database.default' => 'sqlite']);
+    DB::setDefaultConnection('sqlite');
+    DB::purge('demo_isolated');
+});
+
 test('perintah scheduler:demo-data menyiapkan seluruh 9 skenario demonstrasi secara lengkap', function () {
     $exitCode = Artisan::call('scheduler:demo-data');
     expect($exitCode)->toBe(0);
@@ -157,25 +164,30 @@ test('opsi clean membersihkan seluruh data demo secara aman tanpa merusak data p
 });
 
 test('perintah demo diblokir secara ketat pada lingkungan production', function () {
-    // Simulasikan environment production
-    App::detectEnvironment(fn () => 'production');
+    try {
+        // Simulasikan environment production
+        App::detectEnvironment(fn () => 'production');
 
-    $exitCode = Artisan::call('scheduler:demo-data');
-    expect($exitCode)->toBe(1); // Gagal dengan peringatan keamanan
+        $exitCode = Artisan::call('scheduler:demo-data');
+        expect($exitCode)->toBe(1); // Gagal dengan peringatan keamanan
+    } finally {
+        App::detectEnvironment(fn () => 'testing');
+    }
 });
 
 test('perintah demo dapat dijalankan di production khusus showcase jika ALLOW_DEMO_DATA=true dan flag --force-demo diberikan', function () {
-    App::detectEnvironment(fn () => 'production');
     putenv('ALLOW_DEMO_DATA=true');
     $_ENV['ALLOW_DEMO_DATA'] = 'true';
 
     try {
+        App::detectEnvironment(fn () => 'production');
         $exitCode = Artisan::call('scheduler:demo-data', ['--force-demo' => true]);
         expect($exitCode)->toBe(0);
 
         $demoLeavesCount = InstructorLeave::where('reason', 'like', '%'.DemoScenarioSeeder::DEMO_PREFIX.'%')->count();
         expect($demoLeavesCount)->toBeGreaterThanOrEqual(1);
     } finally {
+        App::detectEnvironment(fn () => 'testing');
         putenv('ALLOW_DEMO_DATA');
         unset($_ENV['ALLOW_DEMO_DATA']);
     }
