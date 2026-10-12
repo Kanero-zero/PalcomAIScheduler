@@ -17,7 +17,7 @@ return [
     |
     */
 
-    'default' => env('DB_CONNECTION', 'sqlite'),
+    'default' => env('DEMO_MODE', false) ? 'demo' : env('DB_CONNECTION', 'sqlite'),
 
     /*
     |--------------------------------------------------------------------------
@@ -31,6 +31,18 @@ return [
     */
 
     'connections' => [
+
+        'demo' => [
+            'driver' => 'sqlite',
+            'url' => env('DB_URL'),
+            'database' => env('DEMO_DB_DATABASE', database_path('demo.sqlite')),
+            'prefix' => '',
+            'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+            'busy_timeout' => null,
+            'journal_mode' => null,
+            'synchronous' => null,
+            'transaction_mode' => 'DEFERRED',
+        ],
 
         'sqlite' => [
             'driver' => 'sqlite',

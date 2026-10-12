@@ -22,25 +22,30 @@ Dokumen ini merupakan panduan resmi pengujian end-to-end (E2E), verifikasi alur 
 
 ### A. Eksekusi Data Demo Standar (Database Lokal/Staging)
 Data demo menggunakan tanggal referensi **`2026-10-25`** dan prefix terisolasi **`[DEMO]`**. Perintah ini bersifat idempoten dan aman dijalankan berulang kali:
+### A. Eksekusi Data Demo Standar (Database Terisolasi)
+Data demo menggunakan tanggal referensi **`2026-10-25`** dan prefix terisolasi **`[DEMO]`**. Perintah ini berjalan pada database terisolasi (`database/demo.sqlite`) atau koneksi aktif:
 ```bash
-php artisan scheduler:demo-data --force-demo
+# Menyiapkan data demo pada database terisolasi
+php artisan scheduler:demo-data --isolated
+
+# Atau jika DEMO_MODE=true aktif di .env (mode showcase web):
+php artisan scheduler:demo-data
 ```
 
-### B. Mode Isolasi Penuh (Database Terpisah)
-Untuk pengujian tanpa menyentuh database aktif sama sekali, gunakan flag `--isolated`:
-```bash
-php artisan scheduler:demo-data --isolated
-```
-*Perintah ini secara otomatis membuat dan memigrasikan database terisolasi di `database/demo.sqlite`.*
+### B. Mode Isolasi Penuh (Aplikasi Web Membaca Database Demo)
+Ketika `DEMO_MODE=true` diatur pada `.env`:
+- Konfigurasi `database.default` otomatis mengarah ke koneksi `'demo'` (`database/demo.sqlite`).
+- Seluruh antarmuka web (Dashboard, Jadwal, Approval, Activity Log) membaca dan menulis ke database demo fisik yang terpisah.
+- Database operasional (`database.sqlite` / MySQL) terproteksi 100% dan tidak pernah disentuh.
 
 ### C. Pembersihan Data Demo
-Untuk menghapus seluruh data demo tanpa merusak master data atau jadwal operasional lainnya:
+Untuk mereset atau membersihkan data demo secara aman:
 ```bash
-php artisan scheduler:demo-data --clean --force-demo
+php artisan scheduler:demo-data --clean --isolated
 ```
 
 ### D. Kredensial Pengujian
-- **URL Dashboard:** `http://localhost:8000/dashboard` (atau URL VPS hosting)
+- **URL Dashboard:** `http://localhost:8000/dashboard` (atau URL server showcase: `https://palcomaischeduler.web.id/dashboard`)
 - **Akun Admin:** `admin@palcomtech.ac.id`
 - **Kata Sandi:** Sesuai konfigurasi `.env` (`DEMO_ADMIN_PASSWORD`) atau akun admin yang terdaftar.
 
@@ -159,15 +164,22 @@ php artisan scheduler:demo-data --clean --force-demo
 
 ### Skenario 9: Resiliensi Kegagalan AI (Gemini Fallback & Audit Trail)
 - **Tujuan:** Memverifikasi ketahanan sistem ketika Google Gemini API mengalami timeout, rate-limiting (HTTP 429), atau jaringan terputus. Sistem wajib secara otomatis beralih ke engine deterministik tanpa menampilkan error layar putih kepada pengguna.
-- **Data Awal:** Simulasi kegagalan koneksi Gemini AI tercatat pada pengajuan izin Wahyu.
-- **Langkah Pengujian:**
+- **Pembedaan Validasi (Simulasi vs Eksekusi Nyata):**
+  1. **Log Data Seeder (Showcase Audit Trail):**
+     - Pada seeder awal, tercatat entri `[DEMO SIMULATION]` bertipe `ai` dengan state `fallback` dan metadata `'simulation' => true`.
+     - Tujuannya agar penilai/juri dapat langsung mengamati bagaimana status fallback divisualisasikan pada timeline audit log tanpa harus memutus koneksi internet.
+  2. **Eksekusi Pengujian Nyata (Real Failure Execution Test):**
+     - Diuji secara otomatis melalui `test('skenario gemini fallback yang benar-benar dieksekusi saat api gagal menghasilkan fallback status valid')`.
+     - Menggunakan `Http::fake([... => 503])` yang memanggil `SchedulingEngine::evaluateWithAi()`.
+     - Membuktikan secara nyata bahwa saat API gagal, sistem tidak melempar exception fatal, rekomendasi tetap dihasilkan via rule-based deterministik, dan log fallback baru tercipta secara otomatis.
+- **Langkah Pengujian UI:**
   1. Buka halaman **Activity Log**.
   2. Terapkan filter status AI ke **`fallback`**.
-  3. Buka detail log *Analisis AI dialihkan ke Fallback*.
+  3. Buka detail log *Simulasi Fallback AI: Layanan Gemini Dialihkan ke Deterministik*.
 - **Kriteria Keberhasilan (Pass):**
   - Status AI menampilkan badge **`fallback`**.
-  - Deskripsi log menyatakan: *"Layanan Gemini AI tidak dapat dijangkau. Rekomendasi dialihkan ke hasil deterministik sistem."*
-  - Metadata memuat `'fallback_used' => true`.
+  - Deskripsi log menyatakan: *"[SIMULASI] Layanan Gemini AI disimulasikan mengalami timeout atau batasan kuota. Rekomendasi dialihkan otomatis ke hasil deterministik sistem."*
+  - Metadata memuat `'fallback_used' => true` dan `'simulation' => true`.
   - Sistem tetap menyediakan rekomendasi pengganti berbasis algoritma rule-based internal.
 
 ---

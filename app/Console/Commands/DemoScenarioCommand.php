@@ -13,50 +13,65 @@ class DemoScenarioCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'scheduler:demo-data {--clean : Bersihkan data demo secara aman tanpa menyentuh data operasional} {--force-demo : Izinkan eksekusi khusus showcase jika ALLOW_DEMO_DATA=true diaktifkan di .env} {--isolated : Gunakan database SQLite terisolasi khusus demo (database/demo.sqlite)} {--database= : Gunakan nama koneksi database tertentu}';
+    protected $signature = 'scheduler:demo-data {--clean : Bersihkan data demo secara aman tanpa menyentuh data operasional} {--isolated : Jalankan secara eksplisit pada database SQLite terisolasi (database/demo.sqlite)} {--database= : Gunakan nama koneksi database tertentu}';
 
     /**
      * The console command description.
      *
      * @var string
      */
-    protected $description = 'Menyiapkan atau membersihkan 9 skenario demonstrasi & pengujian PALCOM AI Scheduler';
+    protected $description = 'Menyiapkan atau membersihkan 9 skenario demonstrasi pada database terisolasi';
 
     /**
      * Execute the console command.
      */
     public function handle(): int
     {
+        // 1. Tentukan koneksi target:
+        $connection = $this->option('database');
+
+        if ($this->option('isolated')) {
+            $connection = 'demo';
+        }
+
+        // 2. Proteksi Lingkungan Produksi: Pastikan DEMO_MODE aktif jika di lingkungan produksi
         if (app()->environment('production')) {
-            $allowDemo = (bool) env('ALLOW_DEMO_DATA', false);
-            if (! $this->option('force-demo') || ! $allowDemo) {
-                $this->error('PERINGATAN: Perintah penyedia data demo DILARANG dijalankan di lingkungan produksi demi keamanan data!');
-                $this->line('<fg=yellow>Petunjuk: Untuk instance demo publik terisolasi, aktifkan ALLOW_DEMO_DATA=true pada .env dan sertakan opsi --force-demo.</>');
+            $isDemoMode = (bool) env('DEMO_MODE', false);
+            if (! $isDemoMode) {
+                $this->error('PERINGATAN KEAMANAN: Mode demo (DEMO_MODE=true) tidak aktif di server produksi.');
+                $this->line('<fg=yellow>Perintah ini hanya dapat dijalankan jika DEMO_MODE=true untuk menjamin isolasi database fisik.</>');
 
                 return self::FAILURE;
             }
 
-            $this->warn('Perhatian: Menjalankan data demo pada mode showcase publik dengan pengamanan ganda (ALLOW_DEMO_DATA=true dan --force-demo).');
+            // Di production, selalu paksa koneksi 'demo' (demo.sqlite) demi isolasi total
+            $connection = 'demo';
         }
 
-        $connection = $this->option('database');
+        // 3. Verifikasi Keamanan Tingkat Keras: DILARANG KERAS menulis ke file database operasional
+        if ($connection) {
+            $targetDbFile = config("database.connections.{$connection}.database") ?? database_path('demo.sqlite');
+            $operationalDbFile = config('database.connections.sqlite.database');
 
-        if ($this->option('isolated')) {
-            $isolatedDbPath = database_path('demo.sqlite');
-            if (! file_exists($isolatedDbPath)) {
-                touch($isolatedDbPath);
+            if (! app()->environment('testing') && realpath($targetDbFile) && realpath($operationalDbFile) && realpath($targetDbFile) === realpath($operationalDbFile)) {
+                $this->error('PERINGATAN KRITIS: Target database terdeteksi sebagai database operasional.');
+                $this->error('Perintah scheduler:demo-data DILARANG KERAS mengeksekusi atau membersihkan database operasional demi integritas data riil!');
+
+                return self::FAILURE;
+            }
+        }
+
+        // 4. Pastikan file database terisolasi tersedia dan termigrasi
+        if ($connection === 'demo') {
+            $demoDbPath = config('database.connections.demo.database', database_path('demo.sqlite'));
+            if (! file_exists($demoDbPath)) {
+                if (! file_exists(dirname($demoDbPath))) {
+                    mkdir(dirname($demoDbPath), 0775, true);
+                }
+                touch($demoDbPath);
             }
 
-            config(['database.connections.demo_isolated' => [
-                'driver' => 'sqlite',
-                'database' => $isolatedDbPath,
-                'prefix' => '',
-                'foreign_key_constraints' => true,
-            ]]);
-
-            $connection = 'demo_isolated';
-            $this->call('migrate', ['--database' => 'demo_isolated', '--force' => true]);
-            $this->info("Database terisolasi siap: {$isolatedDbPath}");
+            $this->call('migrate', ['--database' => 'demo', '--force' => true]);
         }
 
         $originalDefault = config('database.default');

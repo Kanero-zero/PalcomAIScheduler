@@ -26,8 +26,8 @@ class DemoScenarioSeeder extends Seeder
      */
     public function run(): void
     {
-        if (app()->environment('production') && ! (bool) env('ALLOW_DEMO_DATA', false)) {
-            $this->command?->error('Pemberitahuan Keamanan: DemoScenarioSeeder dilarang dijalankan di lingkungan produksi!');
+        if (app()->environment('production') && ! (bool) env('DEMO_MODE', false)) {
+            $this->command?->error('Pemberitahuan Keamanan: DemoScenarioSeeder dilarang dijalankan di lingkungan produksi jika DEMO_MODE tidak aktif!');
 
             return;
         }
@@ -325,23 +325,24 @@ class DemoScenarioSeeder extends Seeder
         // -------------------------------------------------------------
         // SKENARIO 9: Skenario Gemini Fallback
         // -------------------------------------------------------------
-        // Catat activity log nyata untuk skenario Gemini Fallback
+        // Catat activity log simulasi untuk showcase fallback
         ActivityLog::updateOrCreate(
             [
                 'type' => 'ai',
                 'instructor_leave_id' => $leaveWahyu->id,
-                'title' => 'Analisis AI dialihkan ke Fallback',
+                'title' => 'Simulasi Fallback AI: Layanan Gemini Dialihkan ke Deterministik',
             ],
             [
                 'state' => 'fallback',
                 'actor' => 'Gemini AI',
-                'description' => self::DEMO_PREFIX.' Layanan Gemini AI tidak dapat dijangkau. Rekomendasi dialihkan ke hasil deterministik sistem.',
+                'description' => self::DEMO_PREFIX.' [SIMULASI] Layanan Gemini AI disimulasikan mengalami timeout atau batasan kuota. Rekomendasi dialihkan otomatis ke hasil deterministik sistem.',
                 'subject' => "Pengajuan Izin #{$leaveWahyu->id}",
                 'metadata' => [
                     'leave_id' => $leaveWahyu->id,
                     'status' => 'fallback',
                     'confidence_score' => null,
                     'fallback_used' => true,
+                    'simulation' => true,
                     'total_analyzed' => 2,
                 ],
             ]

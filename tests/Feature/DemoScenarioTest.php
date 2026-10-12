@@ -12,6 +12,7 @@ use App\Services\Scheduling\SchedulingEngine;
 use Database\Seeders\DemoScenarioSeeder;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
     // Siapkan data dasar master
@@ -102,7 +103,8 @@ test('perintah scheduler:demo-data menyiapkan seluruh 9 skenario demonstrasi sec
 
     expect($fallbackLog)->not->toBeNull()
         ->and($fallbackLog->state_label)->toBe('Mode Fallback')
-        ->and($fallbackLog->metadata['fallback_used'])->toBeTrue();
+        ->and($fallbackLog->metadata['fallback_used'])->toBeTrue()
+        ->and($fallbackLog->metadata['simulation'])->toBeTrue();
 });
 
 test('perintah seeder demo bersifat idempotent dan aman dijalankan berulang kali', function () {
@@ -163,34 +165,66 @@ test('opsi clean membersihkan seluruh data demo secara aman tanpa merusak data p
         ->and(InstructorLeave::find($realLeave->id))->not->toBeNull();
 });
 
-test('perintah demo diblokir secara ketat pada lingkungan production', function () {
+test('perintah demo diblokir secara ketat pada lingkungan production jika DEMO_MODE tidak aktif', function () {
     try {
-        // Simulasikan environment production
         App::detectEnvironment(fn () => 'production');
+        putenv('DEMO_MODE=false');
+        $_ENV['DEMO_MODE'] = 'false';
 
         $exitCode = Artisan::call('scheduler:demo-data');
         expect($exitCode)->toBe(1); // Gagal dengan peringatan keamanan
     } finally {
         App::detectEnvironment(fn () => 'testing');
+        putenv('DEMO_MODE');
+        unset($_ENV['DEMO_MODE']);
     }
 });
 
-test('perintah demo dapat dijalankan di production khusus showcase jika ALLOW_DEMO_DATA=true dan flag --force-demo diberikan', function () {
-    putenv('ALLOW_DEMO_DATA=true');
-    $_ENV['ALLOW_DEMO_DATA'] = 'true';
+test('perintah demo dapat dijalankan di production jika DEMO_MODE=true pada database terisolasi', function () {
+    putenv('DEMO_MODE=true');
+    $_ENV['DEMO_MODE'] = 'true';
 
     try {
         App::detectEnvironment(fn () => 'production');
-        $exitCode = Artisan::call('scheduler:demo-data', ['--force-demo' => true]);
+        $exitCode = Artisan::call('scheduler:demo-data');
         expect($exitCode)->toBe(0);
 
-        $demoLeavesCount = InstructorLeave::where('reason', 'like', '%'.DemoScenarioSeeder::DEMO_PREFIX.'%')->count();
+        $demoLeavesCount = InstructorLeave::on('demo')->where('reason', 'like', '%'.DemoScenarioSeeder::DEMO_PREFIX.'%')->count();
         expect($demoLeavesCount)->toBeGreaterThanOrEqual(1);
     } finally {
         App::detectEnvironment(fn () => 'testing');
-        putenv('ALLOW_DEMO_DATA');
-        unset($_ENV['ALLOW_DEMO_DATA']);
+        putenv('DEMO_MODE');
+        unset($_ENV['DEMO_MODE']);
+        $demoDb = config('database.connections.demo.database', database_path('demo.sqlite'));
+        if (file_exists($demoDb)) {
+            @unlink($demoDb);
+        }
     }
+});
+
+test('skenario gemini fallback yang benar-benar dieksekusi saat api gagal menghasilkan fallback status valid', function () {
+    Artisan::call('scheduler:demo-data');
+    $leave = InstructorLeave::where('reason', 'like', '%'.DemoScenarioSeeder::DEMO_PREFIX.'%')->firstOrFail();
+
+    Http::fake([
+        'generativelanguage.googleapis.com/*' => Http::response(['error' => 'Simulasi Layanan Gemini Down'], 503),
+    ]);
+
+    $result = $this->engine->evaluateWithAi($leave);
+
+    expect($result->aiSummary['status'])->toBe('fallback')
+        ->and($result->aiSummary['fallback_used'])->toBeTrue()
+        ->and($result->allSchedulesResolved)->toBeTrue();
+
+    // Pastikan log fallback hasil eksekusi nyata tercatat
+    $realFallbackLog = ActivityLog::where('type', 'ai')
+        ->where('state', 'fallback')
+        ->where('instructor_leave_id', $leave->id)
+        ->latest('id')
+        ->first();
+
+    expect($realFallbackLog)->not->toBeNull()
+        ->and($realFallbackLog->metadata['fallback_used'])->toBeTrue();
 });
 
 test('opsi clean tidak menghapus jadwal dan izin operasional asli pada tanggal demo', function () {
