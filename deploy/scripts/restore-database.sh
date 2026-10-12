@@ -30,6 +30,9 @@ if [ "$CONFIRM" != "YA" ]; then
     exit 0
 fi
 
+# Penanganan kegagalan: pastikan aplikasi kembali online jika proses restore gagal
+trap 'echo "[ERROR] Terjadi kegagalan pemulihan database! Mengembalikan aplikasi ke mode online..."; php artisan up || true; exit 1' ERR
+
 # 1. Masuk ke maintenance mode
 php artisan down || true
 
@@ -40,6 +43,8 @@ if [ "$DB_CONN" = "sqlite" ]; then
 
     echo "[RESTORE] Memulihkan SQLite database ke ${DB_FILE}..."
     mkdir -p "$(dirname "$DB_FILE")"
+    # Hapus file jurnal WAL dan SHM jika ada untuk mencegah inkonsistensi snapshot
+    rm -f "${DB_FILE}-wal" "${DB_FILE}-shm"
     gunzip -c "$BACKUP_FILE" > "$DB_FILE"
     chmod 664 "$DB_FILE"
     chown www-data:www-data "$DB_FILE" || true

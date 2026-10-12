@@ -73,8 +73,12 @@ sudo nginx -t
 sudo systemctl reload nginx
 
 # 5. Pasang sertifikat SSL gratis via Certbot
-sudo certbot --nginx -d scheduler.palcomtech.ac.id
+sudo certbot --nginx -d palcomaischeduler.web.id
 ```
+
+> [!IMPORTANT]
+> **Perlindungan Konfigurasi HTTPS (Certbot):**
+> Setelah `certbot --nginx` dijalankan, Certbot akan menyisipkan blok sertifikat SSL (`listen 443 ssl;` dan jalur certificate Let's Encrypt) langsung ke file konfigurasi Nginx aktif. **Jangan pernah menimpa file `/etc/nginx/sites-available/palcom-ai-scheduler` secara utuh dengan file template mentah** setelah SSL aktif, karena hal tersebut akan menghapus konfigurasi HTTPS yang sudah berjalan.
 
 ### Fitur Keamanan Konfigurasi Nginx:
 - **HTTP/2 & TLS 1.3** untuk transfer data terenkripsi dan cepat.
@@ -95,7 +99,7 @@ APP_NAME="PALCOM AI Scheduler"
 APP_ENV=production
 APP_KEY=base64:GENERATE_VIA_ARTISAN_KEY_GENERATE
 APP_DEBUG=false
-APP_URL=https://scheduler.palcomtech.ac.id
+APP_URL=https://palcomaischeduler.web.id
 APP_TIMEZONE=Asia/Jakarta
 APP_LOCALE=id
 APP_FALLBACK_LOCALE=en
@@ -132,7 +136,7 @@ ADMIN_EMAILS=admin@palcomtech.ac.id
 
 # Showcase Demo Mode (Opsional untuk instance demo publik juri lomba)
 # Nilai default false demi keamanan produksi. Setel true HANYA jika server ini adalah server showcase demo.
-ALLOW_DEMO_DATA=false
+DEMO_MODE=false
 ```
 
 ### B. Zero-Leakage Checklist
@@ -140,22 +144,22 @@ ALLOW_DEMO_DATA=false
 - [x] Pastikan `GEMINI_API_KEY` hanya disetel pada `.env` server atau injected secrets CI/CD; dilarang keras ditulis di kode atau di-commit ke repositori.
 - [x] Sesi cookie disetel `SESSION_SECURE_COOKIE=true` agar hanya dikirim melalui koneksi HTTPS.
 
-### C. Menjalankan Data Demo pada Showcase Publik (Proteksi Ganda)
+### C. Menjalankan Data Demo Terisolasi pada Showcase Publik
 Untuk kebutuhan penilaian juri pada website publik:
-1. Secara default, `php artisan scheduler:demo-data` diblokir total pada `APP_ENV=production`.
+1. **Isolasi Database Penuh:** Saat `DEMO_MODE=true` aktif, aplikasi web dan perintah Artisan secara otomatis dialihkan ke koneksi database demo mandiri (`database/demo.sqlite`). Database master operasional (`database.sqlite`) dilindungi sepenuhnya dan tidak tersentuh.
 2. Jika server VPS difungsikan sebagai instance showcase demo publik, setel di `.env`:
    ```ini
-   ALLOW_DEMO_DATA=true
+   DEMO_MODE=true
    ```
-3. Eksekusi data demo dengan flag konfirmasi eksplisit:
+3. Eksekusi pengisian data skenario demo ke database demo terisolasi:
    ```bash
-   php artisan scheduler:demo-data --force-demo
+   php artisan scheduler:demo-data
    ```
 4. Reset atau pembersihan data demo kapan saja:
    ```bash
-   php artisan scheduler:demo-data --clean --force-demo
+   php artisan scheduler:demo-data --clean
    ```
-*(Seluruh 9 skenario demo diisolasi dengan tag `[DEMO]` dan tanggal referensi `2026-10-25`, tanpa menggunakan `migrate:fresh`).*
+*(Seluruh 9 skenario demo berjalan di dalam database terisolasi, tanpa mengubah data master operasional).*
 
 ---
 
@@ -169,9 +173,13 @@ Untuk kebutuhan penilaian juri pada website publik:
    ```
 3. Seluruh migrasi PALCOM AI Scheduler dirancang menggunakan `constrained()`, `cascadeOnDelete()`, dan nullable foreign keys yang aman tanpa merusak integritas referensial.
 
-### B. Skrip Backup Otomatis
+### B. Mekanisme Backup Database Online yang Konsisten
 Skrip otomatis tersedia di [`deploy/scripts/backup-database.sh`](deploy/scripts/backup-database.sh).
-Skrip ini mendukung backup SQLite dan MySQL secara otomatis dengan kompresi gzip dan retensi 14 hari.
+
+> [!IMPORTANT]
+> **Konsistensi SQLite Snapshot:**
+> Menyalin file mentah (`cp`) pada database SQLite aktif dengan mode WAL berisiko membaca *torn pages* atau menghasilkan snapshot korup. Skrip backup menggunakan **SQLite Online Backup API** (melalui `sqlite3 .backup` atau ekstensi PHP `SQLite3::backup()`) untuk menjamin snapshot point-in-time yang konsisten tanpa mengunci database operasional.
+> Jika snapshot gagal atau menghasilkan file kosong, skrip keluar dengan kode error (exit 1) dan proses deployment segera dihentikan demi keamanan data.
 
 Pasang cron job backup harian:
 ```bash
@@ -191,7 +199,7 @@ sudo bash deploy/scripts/restore-database.sh /var/backups/palcom-ai-scheduler/sc
 
 ---
 
-## 6. Alur Deployment Otomatis (*Deployment Runbook*)
+## 6. Alur Deployment Terkelola (*Graceful Deployment Runbook*)
 
 Skrip deployment produksi satu langkah tersedia di [`deploy/scripts/deploy.sh`](deploy/scripts/deploy.sh):
 
@@ -201,22 +209,13 @@ cd /var/www/PalcomAIScheduler
 bash deploy/scripts/deploy.sh
 ```
 
-### Tahapan yang Dijalankan oleh `deploy.sh`:
-1. **Pre-flight Check:** Memastikan PHP 8.3, Composer, Node.js, dan Git tersedia.
-2. **Maintenance Mode:** Mengaktifkan maintenance mode ramah pengguna (`php artisan down --retry=60`).
-3. **Backup Otomatis Wajib:** Membuat snapshot database sebelum migrasi. *Jika backup gagal, deployment langsung dibatalkan (exit 1).*
-4. **Git Pull Aman:** Mengambil commit terbaru dari branch target secara fast-forward (`git pull --ff-only origin main`) tanpa `git reset --hard`.
-5. **Composer Install:** Memasang paket PHP produksi (`composer install --no-dev --optimize-autoloader --no-interaction`).
-6. **Frontend Build:** Mengompilasi CSS & JS (`npm ci && npm run build`).
-7. **Database Migration:** Menjalankan migrasi baru (`php artisan migrate --force`).
-8. **Cache Optimization:** Mengoptimalkan performa Laravel:
-   - `php artisan config:cache`
-   - `php artisan route:cache`
-   - `php artisan view:cache`
-9. **Queue Restart:** Memuat ulang antrean worker (`php artisan queue:restart`).
-10. **Permission Fix:** Menjamin file storage dan SQLite database di `/var/lib/palcom-ai-scheduler/database.sqlite` dapat ditulis oleh `www-data`.
-11. **Maintenance Mode Up:** Membuka kembali aplikasi (`php artisan up`).
-12. **Smoke Test:** Menjalankan verifikasi otomatis endpoint HTTP 200 via `deploy/scripts/smoke-test.sh`.
+### Prinsip Keamanan `deploy.sh`:
+1. **Graceful Maintenance Mode:** Mengaktifkan maintenance mode terkelola (`php artisan down --retry=60`) selama proses migrasi dan pembaruan aset, menghindari klaim keliru *zero-downtime*.
+2. **Penanganan Kegagalan Otomatis (Fail-Safe Trap):** Jika terjadi kegagalan pada langkah mana pun (`set -e` / trap `ERR`), skrip secara otomatis menjalankan `php artisan up` agar aplikasi tidak tertinggal offline dalam status maintenance mode.
+3. **Backup Online Wajib:** Melakukan backup SQLite yang konsisten sebelum migrasi. *Jika backup gagal, deployment langsung dibatalkan sebelum perubahan apa pun diterapkan.*
+4. **Git Pull Non-Destruktif:** Mengambil commit terbaru secara fast-forward (`git pull --ff-only origin main`). Dilarang menggunakan `git reset --hard` yang dapat menghilangkan modifikasi lokal atau riwayat branch.
+5. **Penyesuaian Izin Terarah (Targeted Permissions):** Hanya direktori `storage`, `bootstrap/cache`, dan file SQLite yang disesuaikan hak aksesnya ke `www-data`. Tidak melakukan `chown -R` sembarangan pada seluruh direktori root aplikasi.
+6. **Smoke Test Otomatis:** Memverifikasi rute kesehatan `/up`, halaman utama `/`, redirect modul auth terproteksi (`302`), dan proteksi file sensitif (`.env` 403/404) via `deploy/scripts/smoke-test.sh`.
 
 ---
 
@@ -280,7 +279,7 @@ Sebelum melakukan eksekusi deployment langsung ke server VPS produksi, berikut d
 |---|---|---|
 | **Alamat IP / Host VPS** | IPv4 publik (contoh: `103.xxx.xxx.xxx`) | Menunggu konfirmasi |
 | **Akses SSH** | User deploy (sudo non-root) + SSH Public Key | Menunggu konfirmasi |
-| **Domain / Subdomain** | DNS A-Record mengarah ke IP VPS (contoh: `scheduler.palcomtech.ac.id`) | Menunggu konfirmasi |
+| **Domain / Subdomain** | DNS A-Record mengarah ke IP VPS (contoh: `palcomaischeduler.web.id`) | Menunggu konfirmasi |
 | **Kunci API Gemini** | Production Google Gemini API Key (`AIza...`) | Siap dimasukkan ke `.env` |
 | **Port Firewall VPS** | Inbound port 22 (SSH), 80 (HTTP), 443 (HTTPS) terbuka | Siap dikonfigurasi |
 

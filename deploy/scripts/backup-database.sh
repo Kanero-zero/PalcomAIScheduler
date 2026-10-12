@@ -21,14 +21,33 @@ if [ "$DB_CONN" = "sqlite" ]; then
 
     if [ -f "$DB_FILE" ]; then
         BACKUP_FILE="${BACKUP_DIR}/scheduler_sqlite_${TIMESTAMP}.sqlite"
-        # Salin file SQLite secara aman menggunakan perintah .backup SQLite jika sqlite3 terpasang, atau gzip copy
+        # Gunakan Online Backup API SQLite (melalui sqlite3 CLI atau PHP SQLite3 extension)
+        # Dilarang menggunakan salin file mentah (cp) pada database WAL aktif untuk mencegah korupsi data
         if command -v sqlite3 >/dev/null 2>&1; then
             sqlite3 "$DB_FILE" ".backup '${BACKUP_FILE}'"
+        elif php -r 'exit(extension_loaded("sqlite3") ? 0 : 1);' >/dev/null 2>&1; then
+            php -r '
+                $src = new SQLite3($argv[1], SQLITE3_OPEN_READONLY);
+                $dest = new SQLite3($argv[2], SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE);
+                if (! $src->backup($dest)) {
+                    exit(1);
+                }
+                $dest->close();
+                $src->close();
+            ' "$DB_FILE" "$BACKUP_FILE"
         else
-            cp "$DB_FILE" "$BACKUP_FILE"
+            echo "[BACKUP ERROR] Utilitas 'sqlite3' CLI maupun ekstensi PHP 'sqlite3' tidak tersedia untuk melakukan snapshot konsisten online!"
+            exit 1
         fi
+
+        if [ ! -s "$BACKUP_FILE" ]; then
+            echo "[BACKUP ERROR] File snapshot database SQLite kosong atau gagal dibuat: ${BACKUP_FILE}"
+            rm -f "$BACKUP_FILE"
+            exit 1
+        fi
+
         gzip -f "$BACKUP_FILE"
-        echo "[BACKUP] Sukses: Database SQLite dicadangkan ke ${BACKUP_FILE}.gz"
+        echo "[BACKUP] Sukses: Database SQLite dicadangkan secara konsisten ke ${BACKUP_FILE}.gz"
     else
         echo "[BACKUP ERROR] File database SQLite tidak ditemukan pada ${DB_FILE}"
         exit 1

@@ -1,13 +1,33 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Production Deployment Script: PALCOM AI Scheduler
-# Safe, non-destructive, zero-downtime deployment for VPS
+# Safe, graceful maintenance-mode deployment for VPS
 # ==============================================================================
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/var/www/PalcomAIScheduler}"
 BRANCH="${BRANCH:-main}"
 WEB_USER="www-data"
+
+# Penanganan kegagalan otomatis: pulihkan aplikasi dari maintenance mode jika terjadi error
+cleanup_on_error() {
+    local exit_code=$?
+    local line_no=$1
+    echo ""
+    echo "======================================================================"
+    echo "[FATAL ERROR] Deployment terhenti pada baris $line_no (Exit code: $exit_code)!"
+    echo "Memulihkan aplikasi dari maintenance mode agar tidak tertinggal offline..."
+    php artisan up || true
+    echo "Aplikasi telah dikembalikan ke mode online."
+    echo ""
+    echo "PROSEDUR PEMULIHAN / PENINJAUAN:"
+    echo "1. Cek log error lengkap: storage/logs/laravel.log"
+    echo "2. Kembalikan kode ke commit stabil sebelumnya: bash deploy/scripts/rollback.sh"
+    echo "3. Jika database membutuhkan rollback snapshot: sudo bash deploy/scripts/restore-database.sh <file_backup.gz>"
+    echo "======================================================================"
+    exit "$exit_code"
+}
+trap 'cleanup_on_error $LINENO' ERR
 
 echo "======================================================================"
 echo "    MEMULAI DEPLOYMENT PRODUKSI: PALCOM AI SCHEDULER                 "
@@ -77,13 +97,14 @@ php artisan view:cache --quiet
 # Muat ulang queue worker jika diaktifkan
 php artisan queue:restart --quiet || true
 
-# 9. Pastikan hak akses direktori storage, cache, dan database aman
-echo "[8/9] Menyesuaikan kepemilikan dan hak akses file (permissions)..."
-chown -R "$USER":"$WEB_USER" .
+# 9. Pastikan hak akses hanya disesuaikan pada direktori yang membutuhkan izin tulis (tidak sembarangan chown ke seluruh root)
+echo "[8/9] Menyesuaikan hak akses direktori storage, cache, dan database..."
+chown -R "$WEB_USER":"$WEB_USER" storage bootstrap/cache
 chmod -R 775 storage bootstrap/cache
-[ -d "database" ] && chmod -R 775 database
+[ -d "database" ] && chmod 775 database
 if [ -f "database/database.sqlite" ]; then
     chmod 664 database/database.sqlite
+    chown "$WEB_USER":"$WEB_USER" database/database.sqlite || true
 fi
 DB_SQLITE_PATH="$(php artisan tinker --execute="echo config('database.connections.sqlite.database');" 2>/dev/null || echo "/var/lib/palcom-ai-scheduler/database.sqlite")"
 if [ -f "$DB_SQLITE_PATH" ]; then
@@ -97,6 +118,9 @@ fi
 echo "[9/9] Mematikan maintenance mode, aplikasi kembali online..."
 php artisan up
 
+# Nonaktifkan error trap setelah proses rilis sukses penuh
+trap - ERR
+
 echo "======================================================================"
 echo "    DEPLOYMENT BERHASIL! APLIKASI AKTIF & SIAP DIGUNAKAN             "
 echo "======================================================================"
@@ -104,5 +128,5 @@ echo "======================================================================"
 # Jalankan smoke test verifikasi pascadeploy jika script tersedia
 if [ -f "deploy/scripts/smoke-test.sh" ]; then
     echo "Menjalankan uji kesehatan pascadeploy (smoke test)..."
-    bash deploy/scripts/smoke-test.sh "http://127.0.0.1:80" || echo "[WARN] Smoke test selesai dengan catatan."
+    bash deploy/scripts/smoke-test.sh "http://127.0.0.1" || echo "[WARN] Smoke test selesai dengan catatan."
 fi

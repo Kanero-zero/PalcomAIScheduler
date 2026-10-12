@@ -30,15 +30,17 @@ test_url() {
     fi
 }
 
-# 1. Halaman Utama / Login
-test_url "${BASE_URL}/" "200" "Halaman Beranda / Dashboard"
+# 1. Endpoint Kesehatan Laravel & Halaman Utama / Login
+test_url "${BASE_URL}/up" "200" "Laravel Health Check Route"
+test_url "${BASE_URL}/" "200" "Halaman Beranda / Welcome"
 test_url "${BASE_URL}/login" "200" "Halaman Login"
 
-# 2. Halaman Modul Scheduler (jika auth bypass atau guest)
+# 2. Halaman Modul Terproteksi Autentikasi (Harus Redirect 302 untuk Guest)
 test_url "${BASE_URL}/schedules" "302" "Redirect Auth Jadwal Mengajar"
 test_url "${BASE_URL}/instructors" "302" "Redirect Auth Instruktur"
 test_url "${BASE_URL}/rooms" "302" "Redirect Auth Ruangan"
-test_url "${BASE_URL}/activity-log" "200" "Halaman Activity Log Preview"
+test_url "${BASE_URL}/activity-log" "302" "Redirect Auth Activity Log"
+test_url "${BASE_URL}/ai-scheduler" "302" "Redirect Auth AI Scheduler"
 
 # 3. Uji Keberadaan File Asset Ter-bundle
 test_url "${BASE_URL}/build/manifest.json" "200" "Vite Build Manifest"
