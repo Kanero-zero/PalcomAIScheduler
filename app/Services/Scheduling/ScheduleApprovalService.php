@@ -6,6 +6,7 @@ use App\Models\Instructor;
 use App\Models\InstructorLeave;
 use App\Models\Schedule;
 use App\Models\ScheduleSubstitution;
+use App\Services\ActivityLog\ActivityLogService;
 use Carbon\Carbon;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -164,6 +165,11 @@ class ScheduleApprovalService
                     'instructor_id' => $replacementInstructor->id,
                 ]);
 
+                // Catat aktivitas persetujuan dan perubahan jadwal secara atomik di dalam transaksi
+                $activityLogService = app(ActivityLogService::class);
+                $activityLogService->logApproval($substitution, $schedule, $user);
+                $activityLogService->logScheduleUpdated($schedule, $replacementInstructor, $user, $leave->id);
+
                 return [
                     'success' => true,
                     'message' => 'Instruktur pengganti berhasil disetujui dan jadwal kelas telah diperbarui.',
@@ -182,7 +188,7 @@ class ScheduleApprovalService
                     ],
                 ];
             }, 3);
-        } catch (QueryException $e) {
+        } catch (\PDOException|QueryException $e) {
             $this->handleConcurrencyQueryException($e);
         }
     }
@@ -271,6 +277,9 @@ class ScheduleApprovalService
                     ]
                 );
 
+                // Catat aktivitas penolakan secara atomik di dalam transaksi
+                app(ActivityLogService::class)->logRejection($substitution, $schedule, $trimmedReason, $user);
+
                 return [
                     'success' => true,
                     'message' => 'Rekomendasi pengganti berhasil ditolak. Jadwal kelas tidak mengalami perubahan.',
@@ -286,17 +295,17 @@ class ScheduleApprovalService
                     ],
                 ];
             }, 3);
-        } catch (QueryException $e) {
+        } catch (\PDOException|QueryException $e) {
             $this->handleConcurrencyQueryException($e);
         }
     }
 
     /**
-     * Menangani QueryException akibat race condition atau penguncian SQLite.
+     * Menangani QueryException atau PDOException akibat race condition atau penguncian SQLite.
      *
-     * @throws ValidationException|QueryException
+     * @throws ValidationException|QueryException|\PDOException
      */
-    protected function handleConcurrencyQueryException(QueryException $e): never
+    protected function handleConcurrencyQueryException(\Throwable $e): never
     {
         $message = strtolower($e->getMessage());
 

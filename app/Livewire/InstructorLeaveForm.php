@@ -4,7 +4,6 @@ namespace App\Livewire;
 
 use App\Models\Instructor;
 use App\Models\InstructorLeave;
-use App\Services\Scheduling\GeminiSchedulingAdvisor;
 use App\Services\Scheduling\SchedulingEngine;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
@@ -205,10 +204,7 @@ class InstructorLeaveForm extends Component
         }
 
         $engine = app(SchedulingEngine::class);
-        $advisor = app(GeminiSchedulingAdvisor::class);
-
-        $deterministicResult = $engine->evaluateLeave($leave);
-        $enhancedResult = $advisor->enhanceEvaluation($deterministicResult);
+        $enhancedResult = $engine->evaluateWithAi($leave, auth()->user());
 
         $this->schedulingResult = $enhancedResult->toArray();
 
