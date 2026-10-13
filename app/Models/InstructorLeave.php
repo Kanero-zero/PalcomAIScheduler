@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Services\ActivityLog\ActivityLogService;
 use Database\Factories\InstructorLeaveFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -56,6 +57,16 @@ class InstructorLeave extends Model
     }
 
     /**
+     * Boot the model.
+     */
+    protected static function booted(): void
+    {
+        static::created(function (InstructorLeave $leave) {
+            app(ActivityLogService::class)->logLeaveCreated($leave);
+        });
+    }
+
+    /**
      * Keputusan pergantian instruktur untuk jadwal-jadwal yang terdampak izin ini.
      *
      * @return HasMany<ScheduleSubstitution, $this>
@@ -63,5 +74,15 @@ class InstructorLeave extends Model
     public function substitutions(): HasMany
     {
         return $this->hasMany(ScheduleSubstitution::class, 'instructor_leave_id');
+    }
+
+    /**
+     * Riwayat log aktivitas yang terkait dengan pengajuan izin ini.
+     *
+     * @return HasMany<ActivityLog, $this>
+     */
+    public function activityLogs(): HasMany
+    {
+        return $this->hasMany(ActivityLog::class, 'instructor_leave_id');
     }
 }
