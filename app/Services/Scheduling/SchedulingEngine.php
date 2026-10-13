@@ -7,6 +7,7 @@ use App\Models\InstructorLeave;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\ScheduleSubstitution;
+use App\Services\ActivityLog\ActivityLogService;
 use App\Services\Scheduling\DTOs\CandidateEvaluation;
 use App\Services\Scheduling\DTOs\RoomEvaluation;
 use App\Services\Scheduling\DTOs\ScheduleEvaluation;
@@ -52,7 +53,13 @@ class SchedulingEngine
     {
         $deterministicResult = $this->evaluateLeave($leave);
 
-        return app(GeminiSchedulingAdvisor::class)->enhanceEvaluation($deterministicResult);
+        $enhancedResult = app(GeminiSchedulingAdvisor::class)->enhanceEvaluation($deterministicResult);
+
+        if ($enhancedResult->aiSummary) {
+            app(ActivityLogService::class)->logAiRecommendation($enhancedResult, $enhancedResult->aiSummary);
+        }
+
+        return $enhancedResult;
     }
 
     /**
@@ -91,7 +98,7 @@ class SchedulingEngine
 
         $summary = $this->buildResultSummary($totalAffected, $totalResolved, $allResolved);
 
-        return new SchedulingResult(
+        $result = new SchedulingResult(
             leaveId: $leaveId,
             instructorId: $instructor->id,
             instructorName: $instructor->name,
@@ -105,6 +112,12 @@ class SchedulingEngine
             allSchedulesResolved: $allResolved,
             summary: $summary,
         );
+
+        if ($leaveId) {
+            app(ActivityLogService::class)->logEngineEvaluation($result);
+        }
+
+        return $result;
     }
 
     /**
