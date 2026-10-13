@@ -1,10 +1,9 @@
 @import 'tailwindcss';
 @import '../../vendor/livewire/flux/dist/flux.css';
+@import '../../tailwind.sources.css';
 
-@source '../views';
-@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
-@source '../../vendor/livewire/flux-pro/stubs/**/*.blade.php';
-@source '../../vendor/livewire/flux/stubs/**/*.blade.php';
+@source inline("[grid-area:main] [grid-area:sidebar] [grid-area:header] [:where(&)]:w-64 h-8 my-px max-lg:data-flux-sidebar-cloak:hidden data-flux-sidebar-on-mobile:data-flux-sidebar-collapsed-mobile:-translate-x-full data-flux-sidebar-on-mobile:data-flux-sidebar-collapsed-mobile:rtl:translate-x-full z-20! data-flux-sidebar-on-mobile:start-0! data-flux-sidebar-on-mobile:fixed! data-flux-sidebar-on-mobile:top-0! data-flux-sidebar-on-mobile:min-h-dvh! data-flux-sidebar-on-mobile:max-h-dvh! data-flux-sidebar-on-mobile:not-data-flux-sidebar-collapsed-mobile:block");
+@source not inline("in-data-flux-sidebar-on-mobile:h-10");
 
 @custom-variant dark (&:where(.dark, .dark *));
 
