@@ -5,6 +5,7 @@ use App\Models\ActivityLog;
 use App\Models\CourseClass;
 use App\Models\Instructor;
 use App\Models\InstructorLeave;
+use App\Models\InstructorSkill;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\ScheduleSubstitution;
@@ -843,6 +844,74 @@ test('deduplikasi log Scheduling Engine aman dari dua worker proses nyata parale
     }
 });
 
+test('evaluasi penjadwalan yang kembali ke kondisi semula A -> B -> A dicatat sebagai peristiwa baru yang sah', function () {
+    // 1. Kondisi A awal: Wahyu izin, belum ada instruktur lain yang memiliki skill Excel -> 0 kelas terselesaikan
+    $leave = InstructorLeave::create([
+        'instructor_id' => $this->wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'pending',
+    ]);
+
+    Schedule::create([
+        'course_class_id' => $this->courseClass->id,
+        'instructor_id' => $this->wahyu->id,
+        'room_id' => $this->room->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'scheduled',
+    ]);
+
+    // Evaluasi kondisi A pertama
+    $this->schedulingEngine->evaluateLeave($leave);
+
+    $logsA1 = ActivityLog::where('type', 'engine')
+        ->where('instructor_leave_id', $leave->id)
+        ->get();
+
+    expect($logsA1)->toHaveCount(1);
+    $fingerprintA = $logsA1->first()->fingerprint;
+
+    // Evaluasi ulang kondisi A yang sama (A -> A) tidak menduplikasi log
+    $this->schedulingEngine->evaluateLeave($leave);
+    expect(ActivityLog::where('type', 'engine')->where('instructor_leave_id', $leave->id)->count())->toBe(1);
+
+    // 2. Kondisi berubah ke B: Ditambahkan instruktur pengganti yang kompeten
+    $repInstructor = Instructor::create(['name' => 'Budi Santoso', 'status' => 'active']);
+    $skill = InstructorSkill::create([
+        'instructor_id' => $repInstructor->id,
+        'skill' => 'Microsoft Excel',
+        'level' => 'advanced',
+    ]);
+
+    $this->schedulingEngine->evaluateLeave($leave);
+
+    $logsB = ActivityLog::where('type', 'engine')
+        ->where('instructor_leave_id', $leave->id)
+        ->get();
+
+    expect($logsB)->toHaveCount(2);
+    $fingerprintB = $logsB->last()->fingerprint;
+    expect($fingerprintB)->not->toBe($fingerprintA);
+
+    // 3. Kondisi kembali ke A (A -> B -> A): Skill instruktur pengganti dihapus sehingga kembali ke kondisi awal
+    $skill->delete();
+
+    $this->schedulingEngine->evaluateLeave($leave);
+
+    $logsFinal = ActivityLog::where('type', 'engine')
+        ->where('instructor_leave_id', $leave->id)
+        ->orderBy('id')
+        ->get();
+
+    expect($logsFinal)->toHaveCount(3)
+        ->and($logsFinal[0]->fingerprint)->toBe($fingerprintA)
+        ->and($logsFinal[1]->fingerprint)->toBe($fingerprintB)
+        ->and($logsFinal[2]->fingerprint)->toBe($fingerprintA);
+});
+
 test('status gemini ai partial dicatat berbeda dari success pada Activity Log', function () {
     $leave = InstructorLeave::create([
         'instructor_id' => $this->wahyu->id,
@@ -881,6 +950,53 @@ test('status gemini ai partial dicatat berbeda dari success pada Activity Log', 
         ->and($log->description)->toContain('Analisis AI selesai sebagian')
         ->and($log->metadata['status'])->toBe('partial')
         ->and($log->metadata['fallback_used'])->toBeTrue();
+});
+
+test('seluruh status gemini ai success, partial, fallback, dan not_applicable dapat disimpan dan difilter dengan benar', function () {
+    $leave = InstructorLeave::create([
+        'instructor_id' => $this->wahyu->id,
+        'date' => '2026-10-15',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'pending',
+    ]);
+
+    $evalResult = $this->schedulingEngine->evaluateLeave($leave);
+
+    // 1. Success
+    $this->service->logAiRecommendation($evalResult, [
+        'status' => 'success',
+        'fallback_used' => false,
+        'total_analyzed' => 1,
+    ], $this->admin);
+
+    // 2. Partial
+    $this->service->logAiRecommendation($evalResult, [
+        'status' => 'partial',
+        'fallback_used' => true,
+        'total_analyzed' => 2,
+    ], $this->admin);
+
+    // 3. Fallback
+    $this->service->logAiRecommendation($evalResult, [
+        'status' => 'fallback',
+        'fallback_used' => true,
+        'fallback_reason' => 'Quota limit reached',
+        'total_analyzed' => 1,
+    ], $this->admin);
+
+    // 4. Not Applicable
+    $this->service->logAiRecommendation($evalResult, [
+        'status' => 'not_applicable',
+        'total_analyzed' => 0,
+    ], $this->admin);
+
+    // Filter verification via scopeByType and scopeByState
+    expect(ActivityLog::byType('ai')->byState('success')->count())->toBe(1)
+        ->and(ActivityLog::byType('ai')->byState('partial')->count())->toBe(1)
+        ->and(ActivityLog::byType('ai')->byState('fallback')->count())->toBe(1)
+        ->and(ActivityLog::byType('ai')->byState('not_applicable')->count())->toBe(1)
+        ->and(ActivityLog::byType('ai')->byState('all')->count())->toBe(4);
 });
 
 test('rollback transaksi membatalkan log approval yang sempat tertulis jika kegagalan terjadi di tahap penulisan log berikutnya', function () {

@@ -10,8 +10,6 @@ use App\Models\ScheduleSubstitution;
 use App\Models\User;
 use App\Services\Scheduling\DTOs\SchedulingResult;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\QueryException;
-use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -123,7 +121,7 @@ class ActivityLogService
 
         $description = "Pemeriksaan kualifikasi kompetensi, ketersediaan, dan ruangan dijalankan. {$result->totalResolvedSchedules} dari {$result->totalAffectedSchedules} sesi kelas terdampak terselesaikan.";
 
-        $lockKey = "engine_eval_log_{$result->leaveId}_{$fingerprint}";
+        $lockKey = "engine_eval_log_{$result->leaveId}";
 
         try {
             return Cache::lock($lockKey, 10)->block(3, function () use ($result, $actor, $fingerprint, $title, $description) {
@@ -131,13 +129,19 @@ class ActivityLogService
             });
         } catch (\Throwable) {
             return DB::transaction(function () use ($result, $actor, $fingerprint, $title, $description) {
+                // Kunci baris perizinan di database secara eksklusif agar fallback aman dari balapan check-then-insert
+                DB::table('instructor_leaves')
+                    ->where('id', $result->leaveId)
+                    ->update(['updated_at' => DB::raw('updated_at')]);
+
                 return $this->saveEngineEvaluationLogIfUnique($result, $actor, $fingerprint, $title, $description);
             });
         }
     }
 
     /**
-     * Simpan log hasil evaluasi engine jika belum ada log dengan fingerprint yang sama pada evaluasi terakhir atau jendela waktu aktif.
+     * Simpan log hasil evaluasi engine jika belum ada log dengan fingerprint yang sama pada evaluasi terakhir.
+     * Mengizinkan pencatatan peristiwa baru yang sah saat kondisi berubah (termasuk transisi A -> B -> A).
      */
     protected function saveEngineEvaluationLogIfUnique(
         SchedulingResult $result,
@@ -146,28 +150,22 @@ class ActivityLogService
         string $title,
         string $description,
     ): ?ActivityLog {
-        // Cek log engine terakhir untuk leave_id ini. Jika fingerprint identik, jangan catat duplikat.
-        $latestLog = ActivityLog::where('type', 'engine')
-            ->where('instructor_leave_id', $result->leaveId)
-            ->latest('id')
-            ->first();
+        return DB::transaction(function () use ($result, $actor, $fingerprint, $title, $description) {
+            // Kunci baris perizinan di level database secara eksklusif agar aman dari balapan proses paralel
+            DB::table('instructor_leaves')
+                ->where('id', $result->leaveId)
+                ->update(['updated_at' => DB::raw('updated_at')]);
 
-        if ($latestLog && $latestLog->fingerprint === $fingerprint) {
-            return null;
-        }
+            // Cek log engine terakhir untuk leave_id ini. Jika fingerprint identik, jangan catat duplikat.
+            $latestLog = ActivityLog::where('type', 'engine')
+                ->where('instructor_leave_id', $result->leaveId)
+                ->latest('id')
+                ->first();
 
-        // Cek apakah log dengan fingerprint identik sudah dibuat baru saja (mencegah race condition evaluasi paralel)
-        $alreadyLoggedRecently = ActivityLog::where('type', 'engine')
-            ->where('instructor_leave_id', $result->leaveId)
-            ->where('fingerprint', $fingerprint)
-            ->where('created_at', '>=', now()->subMinutes(5))
-            ->exists();
+            if ($latestLog && $latestLog->fingerprint === $fingerprint) {
+                return null;
+            }
 
-        if ($alreadyLoggedRecently) {
-            return null;
-        }
-
-        try {
             return ActivityLog::create([
                 'user_id' => $actor?->id ?? auth()->id(),
                 'type' => 'engine',
@@ -185,10 +183,7 @@ class ActivityLogService
                     'all_resolved' => $result->allSchedulesResolved,
                 ],
             ]);
-        } catch (UniqueConstraintViolationException|QueryException $e) {
-            // Jika terjadi balapan konkurensi (check-then-insert), database unique constraint mencegah duplikasi.
-            return null;
-        }
+        });
     }
 
     /**

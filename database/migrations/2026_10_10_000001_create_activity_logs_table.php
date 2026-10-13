@@ -28,7 +28,6 @@ return new class extends Migration
 
             $table->index(['created_at', 'type']);
             $table->index(['instructor_leave_id', 'type']);
-            $table->unique(['instructor_leave_id', 'fingerprint'], 'unique_leave_engine_fingerprint');
         });
     }
 
