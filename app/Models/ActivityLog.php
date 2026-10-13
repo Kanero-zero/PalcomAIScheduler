@@ -114,6 +114,7 @@ class ActivityLog extends Model
             },
             'fallback' => 'Mode Fallback',
             'not_applicable' => 'Tidak Diperlukan',
+            'partial' => 'Selesai Sebagian',
             'pending' => 'Menunggu',
             'rejected' => 'Ditolak',
             'info' => 'Informasi',

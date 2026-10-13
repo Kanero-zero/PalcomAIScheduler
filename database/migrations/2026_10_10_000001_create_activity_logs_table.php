@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->string('type', 32)->index(); // leave, engine, ai, approval, schedule
-            $table->string('state', 32)->index(); // success, fallback, not_applicable, pending, rejected, info
+            $table->string('state', 32)->index(); // success, fallback, not_applicable, partial, pending, rejected, info
             $table->string('actor'); // e.g. Admin Name, 'Sistem', 'Gemini AI'
             $table->string('title');
             $table->text('description');
@@ -28,6 +28,7 @@ return new class extends Migration
 
             $table->index(['created_at', 'type']);
             $table->index(['instructor_leave_id', 'type']);
+            $table->unique(['instructor_leave_id', 'fingerprint'], 'unique_leave_engine_fingerprint');
         });
     }
 

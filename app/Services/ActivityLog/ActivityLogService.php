@@ -10,6 +10,8 @@ use App\Models\ScheduleSubstitution;
 use App\Models\User;
 use App\Services\Scheduling\DTOs\SchedulingResult;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -51,6 +53,7 @@ class ActivityLogService
 
     /**
      * Catat aktivitas ketika pengajuan izin baru dibuat.
+     * Tidak menduplikasi teks narasi alasan izin ke Activity Log demi perlindungan privasi data medis/pribadi.
      */
     public function logLeaveCreated(InstructorLeave $leave, ?User $actor = null): ActivityLog
     {
@@ -74,7 +77,7 @@ class ActivityLogService
                 'date' => $leave->date?->format('Y-m-d'),
                 'start_time' => $leave->start_time,
                 'end_time' => $leave->end_time,
-                'reason' => $this->minimizeText($leave->reason),
+                'has_reason' => ! empty($leave->reason),
             ],
         ]);
     }
@@ -164,28 +167,33 @@ class ActivityLogService
             return null;
         }
 
-        return ActivityLog::create([
-            'user_id' => $actor?->id ?? auth()->id(),
-            'type' => 'engine',
-            'state' => 'success',
-            'actor' => 'Sistem',
-            'title' => $title,
-            'description' => $description,
-            'subject' => "Pengajuan Izin #{$result->leaveId}",
-            'instructor_leave_id' => $result->leaveId,
-            'fingerprint' => $fingerprint,
-            'metadata' => [
-                'leave_id' => $result->leaveId,
-                'total_affected' => $result->totalAffectedSchedules,
-                'total_resolved' => $result->totalResolvedSchedules,
-                'all_resolved' => $result->allSchedulesResolved,
-            ],
-        ]);
+        try {
+            return ActivityLog::create([
+                'user_id' => $actor?->id ?? auth()->id(),
+                'type' => 'engine',
+                'state' => 'success',
+                'actor' => 'Sistem',
+                'title' => $title,
+                'description' => $description,
+                'subject' => "Pengajuan Izin #{$result->leaveId}",
+                'instructor_leave_id' => $result->leaveId,
+                'fingerprint' => $fingerprint,
+                'metadata' => [
+                    'leave_id' => $result->leaveId,
+                    'total_affected' => $result->totalAffectedSchedules,
+                    'total_resolved' => $result->totalResolvedSchedules,
+                    'all_resolved' => $result->allSchedulesResolved,
+                ],
+            ]);
+        } catch (UniqueConstraintViolationException|QueryException $e) {
+            // Jika terjadi balapan konkurensi (check-then-insert), database unique constraint mencegah duplikasi.
+            return null;
+        }
     }
 
     /**
      * Catat aktivitas rekomendasi cerdas Google Gemini AI.
-     * Mendukung status success, fallback, dan not_applicable secara konsisten.
+     * Mendukung status success, partial, fallback, dan not_applicable secara konsisten.
      *
      * @param  array<string, mixed>  $aiSummary
      */
@@ -196,12 +204,14 @@ class ActivityLogService
         $state = match ($status) {
             'fallback' => 'fallback',
             'not_applicable' => 'not_applicable',
+            'partial' => 'partial',
             default => 'success',
         };
 
         $title = match ($status) {
             'fallback' => 'Analisis AI dialihkan ke Fallback',
             'not_applicable' => 'Analisis AI tidak diperlukan',
+            'partial' => 'Analisis AI selesai sebagian',
             default => 'Pemeringkatan kandidat selesai',
         };
 
@@ -275,20 +285,19 @@ class ActivityLogService
                 'replacement_instructor_id' => $substitution->replacement_instructor_id,
                 'replacement_instructor_name' => $replacementName,
                 'original_instructor_id' => $substitution->original_instructor_id,
-                'notes' => $this->minimizeText($substitution->notes),
+                'has_notes' => ! empty($substitution->notes),
             ],
         ]);
     }
 
     /**
      * Catat aktivitas penolakan rekomendasi pengganti oleh admin.
-     * Menerapkan minimisasi data pada alasan penolakan untuk mencegah kebocoran informasi pribadi (PII).
+     * Tidak menduplikasi narasi alasan penolakan ke Activity Log; detail lengkap tersimpan di tabel schedule_substitutions.
      */
     public function logRejection(ScheduleSubstitution $substitution, Schedule $schedule, string $rejectionReason, ?User $admin = null): ActivityLog
     {
         $adminUser = $admin ?? auth()->user();
         $className = $schedule->courseClass?->name ?? 'Kelas';
-        $minimizedReason = $this->minimizeText($rejectionReason) ?? 'Tidak ada alasan khusus yang disertakan.';
 
         return ActivityLog::create([
             'user_id' => $adminUser?->id,
@@ -296,14 +305,14 @@ class ActivityLogService
             'state' => 'rejected',
             'actor' => $adminUser?->name ?? 'Admin',
             'title' => 'Usulan pengganti ditolak',
-            'description' => "Admin menolak usulan pengganti untuk kelas {$className}. Alasan: {$minimizedReason}",
+            'description' => "Admin menolak usulan pengganti untuk kelas {$className}.",
             'subject' => "Pengajuan Izin #{$substitution->instructor_leave_id}",
             'instructor_leave_id' => $substitution->instructor_leave_id,
             'schedule_id' => $schedule->id,
             'metadata' => [
                 'substitution_id' => $substitution->id,
                 'schedule_id' => $schedule->id,
-                'rejection_reason' => $minimizedReason,
+                'has_rejection_reason' => ! empty($rejectionReason),
             ],
         ]);
     }

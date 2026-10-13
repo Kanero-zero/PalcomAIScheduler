@@ -17,6 +17,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
+use Symfony\Component\Process\Process;
 
 beforeEach(function () {
     $this->admin = User::create([
@@ -76,7 +77,7 @@ test('aktivitas pengajuan izin berhasil disimpan secara permanen di database', f
         ->and($log->state_label)->toBe('Menunggu')
         ->and($log->subject)->toBe("Pengajuan Izin #{$leave->id}")
         ->and($log->description)->toContain('Wahyu')
-        ->and($log->metadata['reason'])->toBe('Sakit demam');
+        ->and($log->metadata['has_reason'])->toBeTrue();
 });
 
 test('aktivitas diurutkan berdasarkan waktu kejadian secara kronologis menurun', function () {
@@ -254,7 +255,7 @@ test('aktivitas persetujuan dan perubahan jadwal dicatat dengan identitas admin 
         ->and($approvalLog->user_id)->toBe($this->admin->id)
         ->and($approvalLog->subject)->toBe("Pengajuan Izin #{$leave->id}")
         ->and($approvalLog->description)->toContain('Kanero')
-        ->and($approvalLog->metadata['notes'])->toBe('Persetujuan resmi BAAK');
+        ->and($approvalLog->metadata['has_notes'])->toBeTrue();
 
     // 2. Periksa log schedule update
     $scheduleLog = ActivityLog::where('type', 'schedule')
@@ -308,8 +309,9 @@ test('aktivitas penolakan pengganti dicatat dengan tepat beserta alasan penolaka
         ->and($rejectLog->state_label)->toBe('Ditolak')
         ->and($rejectLog->actor)->toBe($this->admin->name)
         ->and($rejectLog->user_id)->toBe($this->admin->id)
-        ->and($rejectLog->description)->toContain($reason)
-        ->and($rejectLog->metadata['rejection_reason'])->toBe($reason);
+        ->and($rejectLog->description)->toBe("Admin menolak usulan pengganti untuk kelas {$this->courseClass->name}.")
+        ->and($rejectLog->metadata['has_rejection_reason'])->toBeTrue()
+        ->and(ScheduleSubstitution::where('schedule_id', $schedule->id)->value('rejection_reason'))->toBe($reason);
 });
 
 test('kegagalan transaksi tidak meninggalkan log parsial di database', function () {
@@ -635,7 +637,7 @@ test('analyzeWithAi pada InstructorLeaveForm mencatat aktivitas AI ke Activity L
         ->and($aiLog->metadata['confidence_score'])->toEqual(95);
 });
 
-test('penerapan minimisasi data menyaring informasi pribadi PII pada alasan izin notes dan rejection', function () {
+test('penerapan minimisasi data tidak menduplikasi narasi pribadi ke Activity Log dan menjaga detail di tabel sumber', function () {
     $this->actingAs($this->admin);
 
     // 1. Pengajuan izin dengan data sensitif: No HP, NIK, No RM medis, email
@@ -653,15 +655,20 @@ test('penerapan minimisasi data menyaring informasi pribadi PII pada alasan izin
         ->where('instructor_leave_id', $leave->id)
         ->firstOrFail();
 
-    $minimizedReason = $leaveLog->metadata['reason'];
-    expect($minimizedReason)->not->toContain('081234567890')
-        ->and($minimizedReason)->not->toContain('1671012345678901')
-        ->and($minimizedReason)->not->toContain('wahyu@gmail.com')
-        ->and($minimizedReason)->not->toContain('RM-123456')
-        ->and($minimizedReason)->toContain('[REDACTED_PHONE]')
-        ->and($minimizedReason)->toContain('[REDACTED_ID]')
-        ->and($minimizedReason)->toContain('[REDACTED_EMAIL]')
-        ->and($minimizedReason)->toContain('[REDACTED_MEDICAL_REF]');
+    // Pastikan teks narasi bebas TIDAK disalin ke metadata Activity Log, melainkan hanya referensi dan status
+    expect(array_key_exists('reason', $leaveLog->metadata))->toBeFalse()
+        ->and($leaveLog->metadata['has_reason'])->toBeTrue()
+        ->and($leaveLog->metadata['instructor_name'])->toBe('Wahyu');
+
+    // Pastikan tidak ada kebocoran nomor kontak, NIK, no RM, maupun email pada metadata log
+    $leaveLogJson = json_encode($leaveLog->metadata);
+    expect($leaveLogJson)->not->toContain('081234567890')
+        ->and($leaveLogJson)->not->toContain('1671012345678901')
+        ->and($leaveLogJson)->not->toContain('wahyu@gmail.com')
+        ->and($leaveLogJson)->not->toContain('RM-123456');
+
+    // Data narasi detail tetap terjaga dengan aman di tabel sumber instructor_leaves dengan akses terbatas
+    expect($leave->fresh()->reason)->toBe($rawReason);
 
     // 2. Persetujuan dengan notes yang mengandung nomor HP dan NIK
     $schedule = Schedule::create([
@@ -674,21 +681,24 @@ test('penerapan minimisasi data menyaring informasi pribadi PII pada alasan izin
         'status' => 'scheduled',
     ]);
 
+    $adminNotes = 'Disetujui. Koordinasi via WA 081987654321 atau kontak 1671029384756102';
     $this->approvalService->approveSubstitution(
         leaveId: $leave->id,
         scheduleId: $schedule->id,
         replacementInstructorId: $this->kanero->id,
-        notes: 'Disetujui. Koordinasi via WA 081987654321 atau kontak 1671029384756102',
+        notes: $adminNotes,
     );
 
     $approvalLog = ActivityLog::where('type', 'approval')
         ->where('schedule_id', $schedule->id)
         ->firstOrFail();
 
-    expect($approvalLog->metadata['notes'])->not->toContain('081987654321')
-        ->and($approvalLog->metadata['notes'])->not->toContain('1671029384756102')
-        ->and($approvalLog->metadata['notes'])->toContain('[REDACTED_PHONE]')
-        ->and($approvalLog->metadata['notes'])->toContain('[REDACTED_ID]');
+    expect(array_key_exists('notes', $approvalLog->metadata))->toBeFalse()
+        ->and($approvalLog->metadata['has_notes'])->toBeTrue();
+
+    // Notes tetap tersimpan pada tabel sumber schedule_substitutions
+    $savedNotes = ScheduleSubstitution::where('schedule_id', $schedule->id)->value('notes');
+    expect($savedNotes)->toBe($adminNotes);
 
     // 3. Penolakan dengan alasan yang memuat data kontak pribadi
     $schedule2 = Schedule::create([
@@ -701,30 +711,144 @@ test('penerapan minimisasi data menyaring informasi pribadi PII pada alasan izin
         'status' => 'scheduled',
     ]);
 
+    $rejectionText = 'Instruktur pengganti tidak bersedia dihubungi di nomor 085566778899 email info@kanero.com';
     $this->approvalService->rejectSubstitution(
         leaveId: $leave->id,
         scheduleId: $schedule2->id,
-        rejectionReason: 'Instruktur pengganti tidak bersedia dihubungi di nomor 085566778899 email info@kanero.com',
+        rejectionReason: $rejectionText,
     );
 
     $rejectLog = ActivityLog::where('type', 'approval')
         ->where('schedule_id', $schedule2->id)
         ->firstOrFail();
 
-    expect($rejectLog->description)->not->toContain('085566778899')
-        ->and($rejectLog->description)->not->toContain('info@kanero.com')
-        ->and($rejectLog->metadata['rejection_reason'])->not->toContain('085566778899')
-        ->and($rejectLog->metadata['rejection_reason'])->not->toContain('info@kanero.com')
-        ->and($rejectLog->metadata['rejection_reason'])->toContain('[REDACTED_PHONE]')
-        ->and($rejectLog->metadata['rejection_reason'])->toContain('[REDACTED_EMAIL]');
+    // Narasi bebas tidak disalin ke description log maupun metadata log
+    expect($rejectLog->description)->toBe("Admin menolak usulan pengganti untuk kelas {$this->courseClass->name}.")
+        ->and(array_key_exists('rejection_reason', $rejectLog->metadata))->toBeFalse()
+        ->and($rejectLog->metadata['has_rejection_reason'])->toBeTrue();
+
+    // Alasan penolakan tetap utuh tersimpan di tabel sumber schedule_substitutions
+    $savedRejection = ScheduleSubstitution::where('schedule_id', $schedule2->id)->value('rejection_reason');
+    expect($savedRejection)->toBe($rejectionText);
 });
 
-test('deduplikasi log Scheduling Engine aman dari evaluasi paralel dan balapan konkurensi', function () {
+test('deduplikasi log Scheduling Engine aman dari dua worker proses nyata paralel pada sqlite terisolasi', function () {
+    $isolatedDb = storage_path('framework/testing/concurrency_eval_test.sqlite');
+    @unlink($isolatedDb);
+    touch($isolatedDb);
+
+    $sqlite = new SQLite3($isolatedDb);
+    $sqlite->exec('PRAGMA journal_mode = WAL;');
+    $sqlite->exec('PRAGMA busy_timeout = 10000;');
+    $sqlite->close();
+
+    config([
+        'database.connections.isolated_test_sqlite' => [
+            'driver' => 'sqlite',
+            'database' => $isolatedDb,
+            'prefix' => '',
+            'foreign_key_constraints' => true,
+            'busy_timeout' => 10000,
+        ],
+    ]);
+
+    try {
+        Artisan::call('migrate:fresh', [
+            '--database' => 'isolated_test_sqlite',
+            '--force' => true,
+        ]);
+
+        $wahyuId = DB::connection('isolated_test_sqlite')->table('instructors')->insertGetId([
+            'name' => 'Wahyu',
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $kaneroId = DB::connection('isolated_test_sqlite')->table('instructors')->insertGetId([
+            'name' => 'Kanero',
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::connection('isolated_test_sqlite')->table('instructor_skills')->insert([
+            'instructor_id' => $kaneroId,
+            'skill' => 'Microsoft Excel',
+            'level' => 'advanced',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $classId = DB::connection('isolated_test_sqlite')->table('course_classes')->insertGetId([
+            'name' => 'Microsoft Excel Siang',
+            'subject' => 'Microsoft Excel',
+            'student_count' => 15,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $roomId = DB::connection('isolated_test_sqlite')->table('rooms')->insertGetId([
+            'name' => 'Lab 1',
+            'capacity' => 20,
+            'status' => 'available',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::connection('isolated_test_sqlite')->table('schedules')->insert([
+            'course_class_id' => $classId,
+            'instructor_id' => $wahyuId,
+            'room_id' => $roomId,
+            'date' => '2026-10-15',
+            'start_time' => '13:00',
+            'end_time' => '15:00',
+            'status' => 'scheduled',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $leaveId = DB::connection('isolated_test_sqlite')->table('instructor_leaves')->insertGetId([
+            'instructor_id' => $wahyuId,
+            'date' => '2026-10-15',
+            'start_time' => '13:00',
+            'end_time' => '15:00',
+            'reason' => 'Izin keperluan keluarga',
+            'status' => 'pending',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $cmd = "config(['database.connections.sqlite.database' => '$isolatedDb']); DB::purge('sqlite'); DB::reconnect('sqlite'); \$leave = App\\Models\\InstructorLeave::find($leaveId); app(App\\Services\\Scheduling\\SchedulingEngine::class)->evaluateLeave(\$leave);";
+
+        // Jalankan dua proses OS nyata secara paralel
+        $worker1 = new Process([PHP_BINARY, 'artisan', 'tinker', "--execute=$cmd"], base_path());
+        $worker2 = new Process([PHP_BINARY, 'artisan', 'tinker', "--execute=$cmd"], base_path());
+
+        $worker1->start();
+        $worker2->start();
+
+        $worker1->wait();
+        $worker2->wait();
+
+        expect($worker1->getExitCode())->toBe(0)
+            ->and($worker2->getExitCode())->toBe(0);
+
+        // Hanya boleh ada tepat 1 log engine yang tercatat di database terisolasi
+        $logCount = DB::connection('isolated_test_sqlite')->table('activity_logs')
+            ->where('type', 'engine')
+            ->where('instructor_leave_id', $leaveId)
+            ->count();
+
+        expect($logCount)->toBe(1);
+    } finally {
+        DB::disconnect('isolated_test_sqlite');
+        @unlink($isolatedDb);
+        @unlink($isolatedDb.'-wal');
+        @unlink($isolatedDb.'-shm');
+    }
+});
+
+test('status gemini ai partial dicatat berbeda dari success pada Activity Log', function () {
     $leave = InstructorLeave::create([
         'instructor_id' => $this->wahyu->id,
         'date' => '2026-10-15',
         'start_time' => '13:00',
-        'end_time' => '15:00',
+        'end_time' => '17:00',
         'status' => 'pending',
     ]);
 
@@ -738,17 +862,25 @@ test('deduplikasi log Scheduling Engine aman dari evaluasi paralel dan balapan k
         'status' => 'scheduled',
     ]);
 
-    // Jalankan 5 pemanggilan evaluasi beruntun / simultan
-    for ($i = 0; $i < 5; $i++) {
-        $this->schedulingEngine->evaluateLeave($leave);
-    }
+    $evalResult = $this->schedulingEngine->evaluateLeave($leave);
 
-    // Hanya boleh ada tepat 1 log engine yang tercatat
-    $count = ActivityLog::where('type', 'engine')
-        ->where('instructor_leave_id', $leave->id)
-        ->count();
+    $aiSummaryPartial = [
+        'status' => 'partial',
+        'fallback_used' => true,
+        'fallback_reason' => 'Sebagian kelas menggunakan fallback deterministik.',
+        'total_analyzed' => 2,
+        'confidence_score' => 85,
+    ];
 
-    expect($count)->toBe(1);
+    $log = $this->service->logAiRecommendation($evalResult, $aiSummaryPartial, $this->admin);
+
+    expect($log->type)->toBe('ai')
+        ->and($log->state)->toBe('partial')
+        ->and($log->state_label)->toBe('Selesai Sebagian')
+        ->and($log->title)->toBe('Analisis AI selesai sebagian')
+        ->and($log->description)->toContain('Analisis AI selesai sebagian')
+        ->and($log->metadata['status'])->toBe('partial')
+        ->and($log->metadata['fallback_used'])->toBeTrue();
 });
 
 test('rollback transaksi membatalkan log approval yang sempat tertulis jika kegagalan terjadi di tahap penulisan log berikutnya', function () {
