@@ -56,7 +56,6 @@
         <section aria-label="Timeline aktivitas" class="rounded-2xl border border-zinc-200 bg-white p-4 shadow-xs sm:p-6 dark:border-zinc-800 dark:bg-zinc-900">
             @if (count($activities) === 0)
                 <div class="rounded-xl border border-dashed border-zinc-300 p-8 text-center dark:border-zinc-700">
-                    <flux:icon name="clipboard-list" class="mx-auto size-7 text-zinc-400" />
                     <p class="mt-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100">Tidak ada aktivitas untuk filter yang dipilih.</p>
                     <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Catatan akan tampil ketika backend mencatat aktivitas baru.</p>
                 </div>
