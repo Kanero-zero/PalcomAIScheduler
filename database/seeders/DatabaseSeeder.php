@@ -34,6 +34,7 @@ class DatabaseSeeder extends Seeder
                 [
                     'name' => 'Admin Demo',
                     'password' => 'password',
+                    'role' => 'admin',
                     'email_verified_at' => now(),
                 ]
             );
@@ -42,6 +43,7 @@ class DatabaseSeeder extends Seeder
         // 2. Data Master & Transaksi Penjadwalan
         $this->call([
             InstructorSeeder::class,
+            CompetencySeeder::class,
             InstructorSkillSeeder::class,
             RoomSeeder::class,
             CourseClassSeeder::class,
