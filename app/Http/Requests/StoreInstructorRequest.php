@@ -113,15 +113,19 @@ class StoreInstructorRequest extends FormRequest
                 if (! $master) {
                     $v->errors()->add("competencies.{$index}.id", 'Kompetensi tidak ditemukan di master katalog.');
                     $v->errors()->add('competencies', 'Kompetensi tidak ditemukan di master katalog.');
+                } elseif (! $master->is_active && $this->isNewCompetencyAssignment((int) $master->id)) {
+                    $v->errors()->add("competencies.{$index}.id", "Kompetensi '{$master->name}' berstatus nonaktif dan tidak dapat ditugaskan baru.");
+                    $v->errors()->add('competencies', "Kompetensi '{$master->name}' berstatus nonaktif dan tidak dapat ditugaskan baru.");
                 } elseif ($department && $master->department !== $department) {
                     $v->errors()->add("competencies.{$index}.id", "Kompetensi '{$master->name}' tidak sesuai dengan bidang pembelajaran instruktur ({$department}).");
                     $v->errors()->add('competencies', "Kompetensi '{$master->name}' tidak sesuai dengan bidang pembelajaran instruktur ({$department}).");
                 }
             }
 
-            // 2. Validasi Ketersediaan: Cek rentang waktu, format, start < end, dan overlap
+            // 2. Validasi Ketersediaan: Cek rentang waktu, format jam 00-23 dan menit 00-59, start < end, dan overlap lintas kelompok
             $availabilities = (array) $this->input('availabilities', []);
             $validDays = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+            $parsedSlotsByDay = [];
 
             foreach ($availabilities as $dayData) {
                 $dayName = $dayData['label'] ?? null;
@@ -138,7 +142,10 @@ class StoreInstructorRequest extends FormRequest
                     continue;
                 }
 
-                $parsedSlots = [];
+                if (! isset($parsedSlotsByDay[$dayName])) {
+                    $parsedSlotsByDay[$dayName] = [];
+                }
+
                 foreach ($slots as $slotIdx => $slot) {
                     $start = trim((string) ($slot['start'] ?? ''));
                     $end = trim((string) ($slot['end'] ?? ''));
@@ -149,8 +156,9 @@ class StoreInstructorRequest extends FormRequest
                         continue;
                     }
 
-                    if (! preg_match('/^\d{2}:\d{2}$/', $start) || ! preg_match('/^\d{2}:\d{2}$/', $end)) {
-                        $v->errors()->add('availabilities', "Format jam untuk hari {$dayName} harus HH:MM.");
+                    // Format jam 00-23 dan menit 00-59
+                    if (! preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $start) || ! preg_match('/^(?:[01]\d|2[0-3]):[0-5]\d$/', $end)) {
+                        $v->errors()->add('availabilities', "Format jam untuk hari {$dayName} harus HH:MM dengan jam 00–23 dan menit 00–59.");
 
                         continue;
                     }
@@ -161,18 +169,26 @@ class StoreInstructorRequest extends FormRequest
                         continue;
                     }
 
-                    // Cek overlap terhadap slot lain pada hari yang sama (rentang bersebelahan start == other.end diperbolehkan)
-                    foreach ($parsedSlots as $other) {
+                    // Cek overlap terhadap seluruh slot pada hari yang sama (termasuk jika hari didefinisikan dalam kelompok terpisah)
+                    foreach ($parsedSlotsByDay[$dayName] as $other) {
                         if ($start < $other['end'] && $end > $other['start']) {
                             $v->errors()->add('availabilities', "Rentang jam {$start}-{$end} bertabrakan (overlap) dengan rentang {$other['start']}-{$other['end']} pada hari {$dayName}.");
                             break;
                         }
                     }
 
-                    $parsedSlots[] = ['start' => $start, 'end' => $end];
+                    $parsedSlotsByDay[$dayName][] = ['start' => $start, 'end' => $end];
                 }
             }
         });
+    }
+
+    /**
+     * Tentukan apakah penugasan kompetensi ini merupakan penugasan baru.
+     */
+    protected function isNewCompetencyAssignment(int $competencyId): bool
+    {
+        return true;
     }
 
     /**

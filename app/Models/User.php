@@ -98,32 +98,29 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
 
     /**
      * Tentukan apakah pengguna memiliki role BAAK.
+     * Hanya pengguna dengan role eksplisit 'baak' yang diakui.
      */
     public function isBaak(): bool
     {
-        if (($this->role ?? '') === 'baak') {
-            return true;
-        }
-
-        $email = strtolower(trim((string) $this->email));
-
-        return str_contains($email, 'baak');
+        return ($this->role ?? '') === 'baak';
     }
 
     /**
      * Tentukan apakah pengguna memiliki role AO (Academic Officer / Front Officer).
+     * Hanya pengguna dengan role eksplisit 'ao' yang diakui.
      */
     public function isAo(): bool
     {
-        return ($this->role ?? '') === 'ao' || str_contains(strtolower(trim((string) $this->email)), 'ao');
+        return ($this->role ?? '') === 'ao';
     }
 
     /**
      * Tentukan apakah pengguna memiliki role Instruktur.
+     * Hanya pengguna dengan role eksplisit 'instructor' yang diakui.
      */
     public function isInstructor(): bool
     {
-        return ($this->role ?? '') === 'instructor' || str_contains(strtolower(trim((string) $this->email)), 'instructor');
+        return ($this->role ?? '') === 'instructor';
     }
 
     /**

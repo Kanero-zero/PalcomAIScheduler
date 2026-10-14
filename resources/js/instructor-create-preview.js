@@ -8,17 +8,7 @@ window.palcomInstructorCreate = (initial = null, masterCatalog = []) => ({
     status: initial?.status ? String(initial.status) : (initial ? '' : 'active'),
     notes: initial?.notes ? String(initial.notes) : '',
     bulkLevel: 'advanced',
-    previewCatalog: Array.isArray(masterCatalog) && masterCatalog.length > 0 ? masterCatalog : [
-        { id: 1, name: 'Microsoft Word', department: 'computer' },
-        { id: 2, name: 'Microsoft Excel', department: 'computer' },
-        { id: 3, name: 'Microsoft PowerPoint', department: 'computer' },
-        { id: 4, name: 'Desain Grafis', department: 'computer' },
-        { id: 5, name: 'Web Programming', department: 'computer' },
-        { id: 6, name: 'AI & Python', department: 'computer' },
-        { id: 7, name: 'SpeakOut Level 1', department: 'speakout' },
-        { id: 8, name: 'SpeakOut Level 2', department: 'speakout' },
-        { id: 9, name: 'SpeakOut Level 3', department: 'speakout' },
-    ],
+    previewCatalog: Array.isArray(masterCatalog) ? masterCatalog : [],
     selections: [],
     sequence: 0,
     days: ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map(label => ({

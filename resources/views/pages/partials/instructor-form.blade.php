@@ -135,19 +135,25 @@
             </div>
         @endif
 
-        <label class="mb-4 flex cursor-pointer flex-wrap items-center gap-3 rounded-lg bg-blue-50/80 px-4 py-3 text-sm text-zinc-800 dark:bg-blue-950/30 dark:text-zinc-100">
-            <input type="checkbox" class="size-4 accent-[#1565D8]" :checked="allSelected" @change="toggleAll($event.target.checked)" />
-            <span class="font-semibold text-[#1565D8] dark:text-blue-300">Pilih Semua Kompetensi</span>
-            <span class="text-xs text-zinc-500 dark:text-zinc-400">Hanya bidang yang dipilih; tiap tingkat tetap dapat diubah.</span>
-        </label>
-        <div class="mb-4 flex flex-wrap items-end gap-2">
-            <label class="flex flex-col gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
-                Tingkat penguasaan massal
-                <select x-model="bulkLevel" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-white">
-                    <option value="beginner">Dasar</option><option value="intermediate">Menengah</option><option value="advanced">Mahir</option>
-                </select>
+        <div x-show="department && catalog.length === 0" class="mb-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-4 text-center text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/40 dark:text-zinc-400">
+            Belum ada materi kompetensi yang tersedia pada katalog master untuk bidang ini.
+        </div>
+
+        <div x-show="catalog.length > 0">
+            <label class="mb-4 flex cursor-pointer flex-wrap items-center gap-3 rounded-lg bg-blue-50/80 px-4 py-3 text-sm text-zinc-800 dark:bg-blue-950/30 dark:text-zinc-100">
+                <input type="checkbox" class="size-4 accent-[#1565D8]" :checked="allSelected" @change="toggleAll($event.target.checked)" />
+                <span class="font-semibold text-[#1565D8] dark:text-blue-300">Pilih Semua Kompetensi</span>
+                <span class="text-xs text-zinc-500 dark:text-zinc-400">Hanya bidang yang dipilih; tiap tingkat tetap dapat diubah.</span>
             </label>
-            <button type="button" :disabled="selections.length === 0" @click="applyBulkLevel" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-[#1565D8] hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700">Terapkan ke semua terpilih</button>
+            <div class="mb-4 flex flex-wrap items-end gap-2">
+                <label class="flex flex-col gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                    Tingkat penguasaan massal
+                    <select x-model="bulkLevel" class="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-white">
+                        <option value="beginner">Dasar</option><option value="intermediate">Menengah</option><option value="advanced">Mahir</option>
+                    </select>
+                </label>
+                <button type="button" :disabled="selections.length === 0" @click="applyBulkLevel" class="rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-[#1565D8] hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700">Terapkan ke semua terpilih</button>
+            </div>
         </div>
         <div class="space-y-2">
             <template x-for="(selection, index) in selections" :key="selection.key">

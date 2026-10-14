@@ -575,3 +575,167 @@ test('scenario 20: scheduling engine continues to match instructor skills proper
         ->and($evaluation->skillName)->toBe('Microsoft Excel')
         ->and($evaluation->skillLevel)->toBe('advanced');
 });
+
+// Regression: RBAC does not grant Admin/BAAK based on email substring
+test('regression: staff user with baak or admin in email substring is strictly rejected', function () {
+    $staffWithBaakEmail = User::factory()->create([
+        'email' => 'staff.baak.dummy@palcomtech.ac.id',
+        'role' => 'staff',
+    ]);
+
+    expect($staffWithBaakEmail->isBaak())->toBeFalse()
+        ->and($staffWithBaakEmail->isAdmin())->toBeFalse()
+        ->and($staffWithBaakEmail->canManageInstructors())->toBeFalse();
+
+    $instructor = Instructor::factory()->create(['department' => 'computer']);
+
+    $this->actingAs($staffWithBaakEmail)->get(route('instructors.create'))->assertForbidden();
+    $this->actingAs($staffWithBaakEmail)->post(route('instructors.store'), ['name' => 'Tes'])->assertForbidden();
+    $this->actingAs($staffWithBaakEmail)->get(route('instructors.edit', $instructor))->assertForbidden();
+    $this->actingAs($staffWithBaakEmail)->put(route('instructors.update', $instructor), ['name' => 'Tes'])->assertForbidden();
+});
+
+// Regression: Strict time format rejects invalid hours and minutes
+test('regression: validation rejects invalid hours 24-99 and invalid minutes 60-99', function () {
+    $admin = User::factory()->admin()->create();
+
+    // Invalid hour (24:00)
+    $responseHour = $this->actingAs($admin)->post(route('instructors.store'), [
+        'name' => 'Pengajar Jam Salah',
+        'department' => 'computer',
+        'status' => 'active',
+        'availabilities' => [
+            ['day' => 'Senin', 'start_time' => '24:00', 'end_time' => '25:00'],
+        ],
+    ]);
+    $responseHour->assertSessionHasErrors(['availabilities']);
+
+    // Invalid minute (08:60)
+    $responseMinute = $this->actingAs($admin)->post(route('instructors.store'), [
+        'name' => 'Pengajar Menit Salah',
+        'department' => 'computer',
+        'status' => 'active',
+        'availabilities' => [
+            ['day' => 'Senin', 'start_time' => '08:60', 'end_time' => '09:00'],
+        ],
+    ]);
+    $responseMinute->assertSessionHasErrors(['availabilities']);
+});
+
+// Regression: Duplicate day groups in payload cannot bypass overlap checking
+test('regression: duplicate day groups in availability payload cannot bypass overlap checking', function () {
+    $admin = User::factory()->admin()->create();
+
+    $response = $this->actingAs($admin)->post(route('instructors.store'), [
+        'name' => 'Pengajar Duplicate Day Groups',
+        'department' => 'computer',
+        'status' => 'active',
+        'availabilities' => [
+            [
+                'label' => 'Senin',
+                'enabled' => true,
+                'slots' => [
+                    ['start' => '08:00', 'end' => '11:00'],
+                ],
+            ],
+            [
+                'label' => 'Senin',
+                'enabled' => true,
+                'slots' => [
+                    ['start' => '10:00', 'end' => '12:00'],
+                ],
+            ],
+        ],
+    ]);
+
+    $response->assertSessionHasErrors(['availabilities']);
+    $this->assertDatabaseMissing('instructors', ['name' => 'Pengajar Duplicate Day Groups']);
+});
+
+// Regression: Inactive competency rejected for new assignment via direct request
+test('regression: inactive competency is rejected for new assignment on create and update', function () {
+    $admin = User::factory()->admin()->create();
+    $inactive = Competency::create([
+        'name' => 'PASCAL Programming (Arsip)',
+        'department' => 'computer',
+        'is_active' => false,
+    ]);
+
+    // Direct POST store with inactive competency
+    $responseStore = $this->actingAs($admin)->post(route('instructors.store'), [
+        'name' => 'Pengajar Arsip Baru',
+        'department' => 'computer',
+        'status' => 'active',
+        'competencies' => [
+            ['id' => $inactive->id, 'level' => 'advanced'],
+        ],
+    ]);
+    $responseStore->assertSessionHasErrors(['competencies']);
+    $this->assertDatabaseMissing('instructors', ['name' => 'Pengajar Arsip Baru']);
+
+    // Direct PUT update with NEW inactive competency
+    $instructor = Instructor::factory()->create(['department' => 'computer']);
+    $responseUpdate = $this->actingAs($admin)->put(route('instructors.update', $instructor), [
+        'name' => $instructor->name,
+        'department' => 'computer',
+        'status' => 'active',
+        'competencies' => [
+            ['id' => $inactive->id, 'level' => 'advanced'],
+        ],
+    ]);
+    $responseUpdate->assertSessionHasErrors(['competencies']);
+});
+
+// Regression: Existing historical inactive competency can be preserved during update
+test('regression: existing historical inactive competency is preserved during instructor update', function () {
+    $admin = User::factory()->admin()->create();
+    $inactive = Competency::create([
+        'name' => 'COBOL & Fortran (Arsip)',
+        'department' => 'computer',
+        'is_active' => false,
+    ]);
+
+    $instructor = Instructor::factory()->create([
+        'name' => 'Pengajar Arsip Legasi',
+        'department' => 'computer',
+        'status' => 'active',
+    ]);
+    // Historically attached prior to being inactive
+    $instructor->skills()->create([
+        'competency_id' => $inactive->id,
+        'skill' => 'COBOL & Fortran (Arsip)',
+        'level' => 'advanced',
+    ]);
+
+    // Updating instructor while keeping the historical inactive competency is accepted
+    $response = $this->actingAs($admin)->put(route('instructors.update', $instructor), [
+        'name' => 'Pengajar Arsip Legasi (Updated)',
+        'department' => 'computer',
+        'status' => 'active',
+        'notes' => 'Catatan diupdate.',
+        'competencies' => [
+            ['id' => $inactive->id, 'level' => 'advanced'],
+        ],
+        'availabilities' => [],
+    ]);
+
+    $response->assertRedirect(route('instructors.index'));
+    $this->assertDatabaseHas('instructors', ['name' => 'Pengajar Arsip Legasi (Updated)']);
+    $this->assertDatabaseHas('instructor_skills', [
+        'instructor_id' => $instructor->id,
+        'competency_id' => $inactive->id,
+    ]);
+});
+
+// Regression: Empty master catalog renders truthful empty state without mock data
+test('regression: empty master catalog renders truthful empty state without fake mock catalog', function () {
+    $admin = User::factory()->admin()->create();
+
+    // Delete all competencies
+    Competency::query()->delete();
+
+    $response = $this->actingAs($admin)->get(route('instructors.create'));
+    $response->assertOk()
+        ->assertSee('Belum ada materi kompetensi yang tersedia pada katalog master untuk bidang ini.')
+        ->assertDontSee('Microsoft Word');
+});

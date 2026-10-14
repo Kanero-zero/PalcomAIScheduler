@@ -6,6 +6,14 @@ use App\Models\Competency;
 use App\Models\InstructorSkill;
 use Illuminate\Database\Seeder;
 
+/**
+ * Seeder data awal master kompetensi.
+ *
+ * Menginisialisasi daftar materi kompetensi awal untuk kebutuhan fungsionalitas sistem
+ * dan pengujian, diselaraskan dengan materi yang sudah tersimpan pada basis data.
+ * Catatan: Daftar ini merupakan dataset awal pengembangan, bukan penetapan kurikulum/katalog
+ * resmi definitif institusi (yang memerlukan persetujuan Project Leader / manajemen akademik).
+ */
 class CompetencySeeder extends Seeder
 {
     /**
@@ -14,7 +22,7 @@ class CompetencySeeder extends Seeder
     public function run(): void
     {
         $competencies = [
-            // Bidang Komputer
+            // Materi Komputer (diselaraskan dengan materi pada data awal)
             ['name' => 'Microsoft Word', 'department' => 'computer', 'is_active' => true],
             ['name' => 'Microsoft Excel', 'department' => 'computer', 'is_active' => true],
             ['name' => 'Microsoft PowerPoint', 'department' => 'computer', 'is_active' => true],
