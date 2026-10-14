@@ -11,6 +11,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('approval-review', 'pages.approval-review')->name('approval-review');
     Route::view('schedules', 'pages.schedules')->name('schedules.index');
     Route::view('instructors', 'pages.instructors')->name('instructors.index');
+    Route::view('instructors/create', 'pages.instructors-create')->name('instructors.create');
+    Route::get('instructors/{instructor}/edit', function (\App\Models\Instructor $instructor) {
+        return view('pages.instructors-edit', ['instructor' => $instructor->load('skills')]);
+    })->whereNumber('instructor')->name('instructors.edit');
     Route::view('rooms', 'pages.rooms')->name('rooms.index');
     Route::view('course-classes', 'pages.course-classes')->name('course-classes.index');
     Route::view('instructor-leaves', 'pages.instructor-leaves')->name('instructor-leaves.index');
