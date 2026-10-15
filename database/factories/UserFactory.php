@@ -71,7 +71,44 @@ class UserFactory extends Factory
             return [
                 'name' => 'Admin '.fake()->lastName(),
                 'email' => $email,
+                'role' => 'admin',
             ];
         });
+    }
+
+    /**
+     * Indicate that the user is BAAK staff.
+     */
+    public function baak(): static
+    {
+        return $this->state(fn () => [
+            'name' => 'Staff BAAK '.fake()->lastName(),
+            'email' => 'baak_'.Str::lower(Str::random(6)).'@palcomtech.ac.id',
+            'role' => 'baak',
+        ]);
+    }
+
+    /**
+     * Indicate that the user is AO staff.
+     */
+    public function ao(): static
+    {
+        return $this->state(fn () => [
+            'name' => 'Staff AO '.fake()->lastName(),
+            'email' => 'ao_'.Str::lower(Str::random(6)).'@palcomtech.ac.id',
+            'role' => 'ao',
+        ]);
+    }
+
+    /**
+     * Indicate that the user is an instructor.
+     */
+    public function instructor(): static
+    {
+        return $this->state(fn () => [
+            'name' => 'Instruktur '.fake()->lastName(),
+            'email' => 'instructor_'.Str::lower(Str::random(6)).'@palcomtech.ac.id',
+            'role' => 'instructor',
+        ]);
     }
 }

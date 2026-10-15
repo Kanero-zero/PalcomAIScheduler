@@ -14,16 +14,23 @@ use App\Services\Scheduling\SchedulingEngine;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
 beforeEach(function () {
+    Carbon::setTestNow(Carbon::create(2026, 10, 14, 12));
+
     $this->seed(DatabaseSeeder::class);
     $this->service = app(ScheduleApprovalService::class);
     $this->engine = app(SchedulingEngine::class);
     $this->admin = User::factory()->admin()->create();
     $this->regularUser = User::factory()->create(['email' => 'regular@palcomtech.ac.id']);
+});
+
+afterEach(function () {
+    Carbon::setTestNow();
 });
 
 test('admin can approve candidate substitution and update schedule instructor', function () {
