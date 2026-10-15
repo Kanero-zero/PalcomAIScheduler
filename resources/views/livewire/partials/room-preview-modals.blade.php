@@ -8,7 +8,7 @@
         <button type="button" @click="closeForm()" wire:click="closeForm" aria-label="Tutup formulir ruangan" class="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">✕</button>
     </div>
 
-    <form wire:submit.prevent="save">
+    <form wire:submit.prevent="save" novalidate>
         <div class="space-y-4 px-5 py-5">
             @if ($errors->any())
                 <div role="alert" class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
@@ -23,7 +23,7 @@
 
             <label class="flex flex-col gap-1.5 text-sm font-medium">
                 <span>Nama ruangan <span class="text-rose-600">*</span></span>
-                <input type="text" wire:model="name" x-model="form.name" required maxlength="150" placeholder="Contoh: Lab Komputer 1" class="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm focus:border-[#1565D8] focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white" />
+                <input type="text" wire:model="name" x-model="form.name" maxlength="150" placeholder="Contoh: Lab Komputer 1" class="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm focus:border-[#1565D8] focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white" />
                 @error('name')
                     <span class="text-xs text-rose-600 dark:text-rose-400">{{ $message }}</span>
                 @enderror
@@ -52,7 +52,7 @@
 
             <label class="flex flex-col gap-1.5 text-sm font-medium">
                 <span>Kapasitas maksimal <span class="text-rose-600">*</span></span>
-                <input type="number" wire:model="capacity" x-model="form.capacity" min="1" step="1" required placeholder="Contoh: 20" class="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm focus:border-[#1565D8] focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white" />
+                <input type="number" wire:model="capacity" x-model="form.capacity" min="1" step="1" placeholder="Contoh: 20" class="w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm focus:border-[#1565D8] focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white" />
                 <span class="text-xs font-normal text-zinc-500">Jumlah maksimal siswa yang dapat ditampung secara efektif.</span>
                 @error('capacity')
                     <span class="text-xs text-rose-600 dark:text-rose-400">{{ $message }}</span>
