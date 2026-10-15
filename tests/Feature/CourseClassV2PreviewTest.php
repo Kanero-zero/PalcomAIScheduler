@@ -20,6 +20,8 @@ test('course class v2 preview displays approved navigation and leaves existing c
         ->assertSee('Simpan Kelas')
         ->assertSee('Simpan Draft')
         ->assertSee('Terbitkan Kurikulum')
+        ->assertDontSee('@click="addTrack(0)"', false)
+        ->assertSee('@click="addTrack(pi)"', false)
         ->assertSee('<button type="button" disabled title="Belum ada backend untuk menyimpan kelas" class="cursor-not-allowed rounded-xl bg-[#1565D8] px-5 py-2.5 text-sm font-semibold text-white opacity-40">Simpan Kelas</button>', false)
         ->assertSee('<button type="button" disabled class="cursor-not-allowed rounded-xl border border-blue-200 px-4 py-2.5 text-sm font-semibold text-[#1565D8] opacity-40">Simpan Draft</button>', false)
         ->assertSee('<button type="button" disabled class="cursor-not-allowed rounded-xl bg-[#1565D8] px-4 py-2.5 text-sm font-semibold text-white opacity-40">Terbitkan Kurikulum</button>', false)
