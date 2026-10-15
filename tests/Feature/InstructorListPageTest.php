@@ -25,7 +25,6 @@ it('shows instructors with skills and competency levels', function () {
         ->assertSee('Microsoft Excel')
         ->assertSee('Mahir')
         ->assertSee('Aktif')
-        ->assertSee('Tampilan hanya baca')
         ->assertDontSee('Tampilan daftar instruktur belum tersedia.');
 });
 

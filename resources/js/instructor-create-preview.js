@@ -1,27 +1,14 @@
-// Shared, frontend-only preview for the approved Instructor Create and Edit forms (PALCOM AI Scheduler V2).
-// No persistence, API calls, or backend mutations are performed here.
-// The preview catalog MUST be replaced by the shared competency master from backend.
-window.palcomInstructorCreate = (initial = null) => ({
+// Shared frontend implementation for Instructor Create and Edit forms (PALCOM AI Scheduler V2).
+// Supports master competency catalog injection and full two-way hydration from database records.
+window.palcomInstructorCreate = (initial = null, masterCatalog = []) => ({
     isEditing: Boolean(initial),
     savedSkills: Array.isArray(initial?.skills) ? initial.skills : [],
-    name: '',
-    // The current Instructor table has no department field. Never assume a saved value.
-    department: initial ? '' : 'computer',
-    status: initial ? '' : 'active',
-    notes: '',
+    name: initial?.name ? String(initial.name) : '',
+    department: initial?.department ? String(initial.department) : (initial ? '' : 'computer'),
+    status: initial?.status ? String(initial.status) : (initial ? '' : 'active'),
+    notes: initial?.notes ? String(initial.notes) : '',
     bulkLevel: 'advanced',
-    // Illustrative values ONLY. Not an authoritative list of course competencies.
-    previewCatalog: [
-        { id: 'preview-word', name: 'Microsoft Word', department: 'computer' },
-        { id: 'preview-excel', name: 'Microsoft Excel', department: 'computer' },
-        { id: 'preview-powerpoint', name: 'Microsoft PowerPoint', department: 'computer' },
-        { id: 'preview-design', name: 'Desain Grafis', department: 'computer' },
-        { id: 'preview-web', name: 'Web Programming', department: 'computer' },
-        { id: 'preview-ai', name: 'AI & Python', department: 'computer' },
-        { id: 'preview-speakout-1', name: 'SpeakOut Level 1', department: 'speakout' },
-        { id: 'preview-speakout-2', name: 'SpeakOut Level 2', department: 'speakout' },
-        { id: 'preview-speakout-3', name: 'SpeakOut Level 3', department: 'speakout' },
-    ],
+    previewCatalog: Array.isArray(masterCatalog) ? masterCatalog : [],
     selections: [],
     sequence: 0,
     days: ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'].map(label => ({
@@ -32,10 +19,26 @@ window.palcomInstructorCreate = (initial = null) => ({
 
     init() {
         if (!this.isEditing) return;
-        this.name = String(initial.name ?? '');
-        this.status = ['active', 'inactive'].includes(initial.status) ? initial.status : '';
-        // Notes, department and availability are not stored in the current schema.
-        // Do not hydrate them with fabricated data.
+
+        // Hydrate availability slots from saved database records
+        if (Array.isArray(initial?.availabilities)) {
+            const availMap = {};
+            initial.availabilities.forEach(a => {
+                if (!availMap[a.day]) availMap[a.day] = [];
+                availMap[a.day].push({ key: ++this.sequence, start: a.start_time, end: a.end_time });
+            });
+            this.days.forEach(day => {
+                if (availMap[day.label] && availMap[day.label].length > 0) {
+                    day.enabled = true;
+                    day.slots = availMap[day.label];
+                }
+            });
+        }
+
+        // Hydrate selections matching the current department
+        if (this.department) {
+            this.departmentChanged();
+        }
     },
     get catalog() {
         return this.previewCatalog.filter(item => item.department === this.department);
@@ -47,43 +50,48 @@ window.palcomInstructorCreate = (initial = null) => ({
         this.selections = [];
         if (!this.isEditing || !this.department) return;
 
-        // Preview only: exact-name match with the illustrative catalog. Unmatched
-        // saved skills remain visible separately, rather than silently disappearing.
         const used = new Set();
         this.savedSkills.forEach(saved => {
-            const match = this.catalog.find(item => item.name.toLowerCase() === String(saved.skill).trim().toLowerCase());
+            let match = null;
+            if (saved.competency_id) {
+                match = this.catalog.find(item => Number(item.id) === Number(saved.competency_id));
+            }
+            if (!match) {
+                match = this.catalog.find(item => item.name.toLowerCase() === String(saved.skill).trim().toLowerCase());
+            }
             if (!match || used.has(match.id)) return;
             used.add(match.id);
             this.selections.push({
                 key: ++this.sequence,
                 id: match.id,
-                level: ['beginner', 'intermediate', 'advanced'].includes(saved.level) ? saved.level : '',
+                level: ['beginner', 'intermediate', 'advanced'].includes(saved.level) ? saved.level : 'intermediate',
             });
         });
     },
     get unmatchedSkills() {
         if (!this.isEditing) return [];
         return this.savedSkills.filter(saved => !this.catalog.some(item =>
+            (saved.competency_id && Number(item.id) === Number(saved.competency_id)) ||
             item.name.toLowerCase() === String(saved.skill).trim().toLowerCase()));
     },
     addCompetency() {
-        const next = this.catalog.find(item => !this.selections.some(selected => selected.id === item.id));
+        const next = this.catalog.find(item => !this.selections.some(selected => Number(selected.id) === Number(item.id)));
         if (next) this.selections.push({ key: ++this.sequence, id: next.id, level: this.bulkLevel });
     },
     removeCompetency(key) {
         this.selections = this.selections.filter(item => item.key !== key);
     },
     changeCompetency(key, id) {
-        if (this.selections.some(item => item.id === id && item.key !== key)) return;
+        if (this.selections.some(item => Number(item.id) === Number(id) && item.key !== key)) return;
         const selection = this.selections.find(item => item.key === key);
-        if (selection) selection.id = id;
+        if (selection) selection.id = Number(id);
     },
     toggleAll(checked) {
         if (checked) {
             this.selections = this.catalog.map(item => ({
                 key: ++this.sequence,
                 id: item.id,
-                level: this.selections.find(selected => selected.id === item.id)?.level ?? this.bulkLevel,
+                level: this.selections.find(selected => Number(selected.id) === Number(item.id))?.level ?? this.bulkLevel,
             }));
         } else {
             this.selections = [];
@@ -105,7 +113,7 @@ window.palcomInstructorCreate = (initial = null) => ({
         if (day.slots.length === 0) day.enabled = false;
     },
     invalidSlot(day, slot) {
-        if (!slot.start || !slot.end) return false; // Incomplete inputs are indicated by HTML required.
+        if (!slot.start || !slot.end) return false;
         if (slot.end <= slot.start) return true;
         return day.slots.some(other => other.key !== slot.key && other.start && other.end
             && slot.start < other.end && slot.end > other.start);
