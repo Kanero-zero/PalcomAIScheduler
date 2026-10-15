@@ -25,7 +25,8 @@ it('shows room names, capacity and operational status', function () {
         ->assertSee('Operasional')
         ->assertSee('Tambah Ruangan')
         ->assertSee('Lihat Detail')
-        ->assertSee('disabled aria-disabled="true"', false)
+        ->assertSee('Simpan Ruangan')
+        ->assertDontSee('disabled aria-disabled="true"', false)
         ->assertSee('Status operasional bukan jaminan ruangan kosong')
         ->assertDontSee('Informasi ketersediaan ruangan belum tersedia.');
 });
