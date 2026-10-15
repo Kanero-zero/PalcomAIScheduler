@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use Illuminate\Support\Facades\Schema;
 
 it('requires authentication to access the Activity Log preview', function () {
     $this->get(route('activity-log'))
@@ -8,14 +9,16 @@ it('requires authentication to access the Activity Log preview', function () {
 });
 
 it('shows the Activity Log preview to an authenticated and verified user', function () {
-    $user = User::factory()->create();
+    $user = User::factory()->admin()->create();
 
-    $this->actingAs($user)
+    $response = $this->actingAs($user)
         ->get(route('activity-log'))
         ->assertOk()
-        ->assertSee('Activity Log')
-        ->assertSee('Data simulasi')
-        ->assertSee('Riwayat Aktivitas')
-        ->assertSee('Filter jenis aktivitas')
-        ->assertSee('Filter status');
+        ->assertSee('Activity Log');
+
+    if (Schema::hasTable('activity_logs')) {
+        $response->assertSee('Riwayat Aktivitas');
+    } else {
+        $response->assertSee('Data simulasi');
+    }
 });

@@ -1,7 +1,9 @@
 <?php
 
 use App\Livewire\ActivityLogTimeline;
+use App\Models\ActivityLog;
 use App\Models\User;
+use App\Services\ActivityLog\ActivityLogService;
 use Illuminate\Support\Facades\Schema;
 use Livewire\Livewire;
 
@@ -30,7 +32,7 @@ test('administrator can access activity log with no demo records', function () {
     $response->assertDontSee('Admin Demo');
     $response->assertDontSee('Pratinjau - Data simulasi');
 
-    if (! class_exists(\App\Services\ActivityLog\ActivityLogService::class)
+    if (! class_exists(ActivityLogService::class)
         || ! Schema::hasTable('activity_logs')) {
         $response->assertSee('Riwayat nyata belum tersedia');
     }
@@ -49,14 +51,14 @@ test('administrator can reset activity filters', function () {
 });
 
 test('when backend is available sensitive activity log metadata stays hidden', function () {
-    if (! class_exists(\App\Models\ActivityLog::class)) {
+    if (! class_exists(ActivityLog::class)) {
         $this->markTestSkipped('Backend PR #16 belum tersedia.');
     }
 
     config()->set('auth.admin_emails', ['admin@palcom.test']);
     $this->actingAs(User::factory()->create(['email' => 'admin@palcom.test']));
 
-    \App\Models\ActivityLog::query()->create([
+    ActivityLog::query()->create([
         'type' => 'leave',
         'state' => 'pending',
         'actor' => 'Admin Uji',

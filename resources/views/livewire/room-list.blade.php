@@ -1,3 +1,8 @@
+@php
+    $user = auth()->user();
+    $canManageRooms = $user?->isAdmin() === true || $user?->isBaak() === true;
+@endphp
+
 <div x-data="palcomRoomPreview()" class="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6">
     <header class="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -5,7 +10,9 @@
             <h1 class="mt-1 text-2xl font-bold tracking-tight text-zinc-900 dark:text-white sm:text-3xl">Data Ruangan &amp; Lab</h1>
             <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">Data kapasitas dan status operasional ruangan LKP PalComTech.</p>
         </div>
-        <button type="button" @click="openCreate()" class="inline-flex items-center rounded-xl bg-[#1565D8] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0A3D91]">+ Tambah Ruangan</button>
+        @if ($canManageRooms)
+            <button type="button" @click="openCreate()" class="inline-flex items-center rounded-xl bg-[#1565D8] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0A3D91]">+ Tambah Ruangan</button>
+        @endif
     </header>
 
     <section aria-label="Ringkasan ruangan" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -79,7 +86,7 @@
                                 <td class="px-2 py-3 align-top text-xs text-amber-700 dark:text-amber-300">Belum tercatat</td>
                                 <td class="px-2 py-3 align-top">{{ number_format($room->capacity, 0, ',', '.') }} orang</td>
                                 <td class="px-2 py-3 align-top">
-                                    <span class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ match ($room->status) { 'available' => 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300', 'maintenance' => 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300', default => 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300' } }}">
+                                    <span aria-label="Status {{ $room->name }}: {{ match ($room->status) { 'available' => 'Operasional', 'maintenance' => 'Perawatan', 'unavailable' => 'Tidak operasional', default => \Illuminate\Support\Str::headline($room->status) } }}" class="inline-flex rounded-full px-2.5 py-1 text-xs font-semibold {{ match ($room->status) { 'available' => 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300', 'maintenance' => 'bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300', default => 'bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300' } }}">
                                         {{ match ($room->status) { 'available' => 'Operasional', 'maintenance' => 'Perawatan', 'unavailable' => 'Tidak operasional', default => \Illuminate\Support\Str::headline($room->status) } }}
                                     </span>
                                 </td>
@@ -87,7 +94,9 @@
                                 <td class="px-2 py-3 align-top">
                                     <div class="flex flex-wrap items-center gap-1.5">
                                         <button type="button" @click="openDetail(@js(['id' => $room->id, 'name' => $room->name, 'capacity' => $room->capacity, 'status' => $room->status]))" class="whitespace-nowrap rounded-lg border border-zinc-300 px-2 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200">Lihat Detail</button>
-                                        <button type="button" @click="openEdit(@js(['id' => $room->id, 'name' => $room->name, 'capacity' => $room->capacity, 'status' => $room->status]))" class="rounded-lg border border-blue-200 px-2 py-1.5 text-xs font-semibold text-[#1565D8] hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300">Edit</button>
+                                        @if ($canManageRooms)
+                                            <button type="button" @click="openEdit(@js(['id' => $room->id, 'name' => $room->name, 'capacity' => $room->capacity, 'status' => $room->status]))" class="rounded-lg border border-blue-200 px-2 py-1.5 text-xs font-semibold text-[#1565D8] hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300">Edit</button>
+                                        @endif
                                     </div>
                                 </td>
                             </tr>
@@ -99,5 +108,27 @@
         @endif
     </section>
 
-    @include('livewire.partials.room-preview-modals')
+    @if ($canManageRooms)
+        @include('livewire.partials.room-preview-modals')
+    @else
+        <dialog x-ref="roomDetailDialog" aria-labelledby="room-detail-heading" class="max-h-[85vh] w-[min(94vw,34rem)] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-0 text-left text-zinc-900 shadow-2xl backdrop:bg-zinc-900/60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+            <div class="flex items-start justify-between gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
+                <div>
+                    <h2 id="room-detail-heading" class="text-lg font-bold" x-text="'Detail Ruangan — ' + (selected?.name ?? '')"></h2>
+                    <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Data yang benar-benar tercatat di sistem.</p>
+                </div>
+                <button type="button" @click="closeDetail()" aria-label="Tutup detail ruangan" class="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">✕</button>
+            </div>
+            <dl class="grid gap-5 px-5 py-5 text-sm sm:grid-cols-2">
+                <div><dt class="text-xs font-semibold text-zinc-500">Nama ruangan</dt><dd class="mt-1 break-words font-semibold" x-text="selected?.name ?? '—'"></dd></div>
+                <div><dt class="text-xs font-semibold text-zinc-500">Status operasional</dt><dd class="mt-1" x-text="statusLabel(selected?.status)"></dd></div>
+                <div><dt class="text-xs font-semibold text-zinc-500">Bidang pembelajaran</dt><dd class="mt-1 text-amber-700 dark:text-amber-300">Belum tercatat</dd></div>
+                <div><dt class="text-xs font-semibold text-zinc-500">Kapasitas maksimal</dt><dd class="mt-1"><span x-text="selected?.capacity ?? '—'"></span> siswa</dd></div>
+                <div class="sm:col-span-2"><dt class="text-xs font-semibold text-zinc-500">Catatan</dt><dd class="mt-1 text-amber-700 dark:text-amber-300">Belum tercatat</dd></div>
+            </dl>
+            <footer class="flex justify-end border-t border-zinc-200 px-5 py-4 dark:border-zinc-700">
+                <button type="button" @click="closeDetail()" class="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200">Tutup</button>
+            </footer>
+        </dialog>
+    @endif
 </div>
