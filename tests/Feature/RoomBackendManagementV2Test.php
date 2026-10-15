@@ -7,7 +7,9 @@ use App\Models\Instructor;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\User;
+use App\Services\Room\RoomConflictGuard;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Livewire\Livewire;
 
 beforeEach(function () {
@@ -683,4 +685,243 @@ test('R22: fail closed rejects risky edits when class subject is uncataloged or 
         ->assertHasErrors(['status']);
 
     expect($room->fresh()->status)->toBe('available');
+});
+
+// Tes Tambahan 1: Timezone WIB - Jadwal hari ini belum mulai mengunci ruangan
+test('timezone WIB: schedule today not yet started locks room status change', function () {
+    // Set waktu saat ini ke pukul 08:00:00 WIB pada 15 Oktober 2026
+    Carbon::setTestNow(Carbon::create(2026, 10, 15, 8, 0, 0, 'Asia/Jakarta'));
+
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create(['status' => 'available', 'department' => 'computer']);
+    $class = CourseClass::factory()->create(['subject' => 'Microsoft Excel', 'student_count' => 10]);
+
+    // Jadwal hari ini pukul 09:00 - 11:00 WIB (belum mulai)
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-15',
+        'start_time' => '09:00:00',
+        'end_time' => '11:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    $this->actingAs($admin);
+
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('formStatus', 'maintenance')
+        ->call('save')
+        ->assertHasErrors(['status']);
+
+    expect($room->fresh()->status)->toBe('available');
+});
+
+// Tes Tambahan 2: Timezone WIB - Jadwal hari ini sedang berlangsung mengunci ruangan
+test('timezone WIB: schedule today in-progress locks room status change', function () {
+    // Set waktu saat ini ke pukul 10:00:00 WIB pada 15 Oktober 2026
+    Carbon::setTestNow(Carbon::create(2026, 10, 15, 10, 0, 0, 'Asia/Jakarta'));
+
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create(['status' => 'available', 'department' => 'computer']);
+    $class = CourseClass::factory()->create(['subject' => 'Microsoft Excel', 'student_count' => 10]);
+
+    // Jadwal hari ini pukul 09:00 - 11:00 WIB (sedang berlangsung)
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-15',
+        'start_time' => '09:00:00',
+        'end_time' => '11:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    $this->actingAs($admin);
+
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('formStatus', 'maintenance')
+        ->call('save')
+        ->assertHasErrors(['status']);
+
+    expect($room->fresh()->status)->toBe('available');
+});
+
+// Tes Tambahan 3: Timezone WIB - Jadwal hari ini yang sudah selesai TIDAK mengunci ruangan
+test('timezone WIB: schedule today already completed does not lock room status change', function () {
+    // Set waktu saat ini ke pukul 12:00:00 WIB pada 15 Oktober 2026
+    Carbon::setTestNow(Carbon::create(2026, 10, 15, 12, 0, 0, 'Asia/Jakarta'));
+
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create(['status' => 'available', 'department' => 'computer']);
+    $class = CourseClass::factory()->create(['subject' => 'Microsoft Excel', 'student_count' => 10]);
+
+    // Jadwal hari ini pukul 09:00 - 11:00 WIB (sudah selesai sebelum 12:00 WIB)
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-15',
+        'start_time' => '09:00:00',
+        'end_time' => '11:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    $this->actingAs($admin);
+
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('formStatus', 'maintenance')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($room->fresh()->status)->toBe('maintenance');
+});
+
+// Tes Tambahan 4: Timezone WIB - Pergantian tanggal WIB dihitung akurat
+test('timezone WIB: midnight date rollover is evaluated in Asia/Jakarta', function () {
+    // Pukul 23:30 UTC tanggal 15 Oktober = Pukul 06:30 WIB tanggal 16 Oktober
+    Carbon::setTestNow(Carbon::create(2026, 10, 15, 23, 30, 0, 'UTC'));
+
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create(['status' => 'available', 'department' => 'computer']);
+    $class = CourseClass::factory()->create(['subject' => 'Microsoft Excel', 'student_count' => 10]);
+
+    // Jadwal tanggal 16 Oktober pukul 09:00 - 11:00 WIB (mendatang di WIB)
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-16',
+        'start_time' => '09:00:00',
+        'end_time' => '11:00:00',
+        'status' => 'scheduled',
+    ]);
+
+    $this->actingAs($admin);
+
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('formStatus', 'maintenance')
+        ->call('save')
+        ->assertHasErrors(['status']);
+
+    expect($room->fresh()->status)->toBe('available');
+});
+
+// Tes Tambahan 5: Fail-Closed pada penurunan kapasitas jika data relasi kelas tidak ditemukan
+test('fail closed: decreasing capacity is rejected if class relation is missing or unverifiable', function () {
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create(['capacity' => 20, 'department' => 'computer']);
+
+    // Buat mock schedule dengan relasi courseClass bernilai null (data kelas hilang / tidak ditemukan)
+    $mockSchedule = new Schedule([
+        'room_id' => $room->id,
+        'date' => '2026-10-25',
+        'start_time' => '13:00:00',
+        'end_time' => '15:00:00',
+        'status' => 'scheduled',
+    ]);
+    $mockSchedule->setRelation('courseClass', null);
+
+    $mockGuard = new class($mockSchedule) extends RoomConflictGuard
+    {
+        public function __construct(private Schedule $schedule) {}
+
+        public function getUpcomingSchedulesForRoom(int $roomId): Collection
+        {
+            return collect([$this->schedule]);
+        }
+    };
+
+    app()->instance(RoomConflictGuard::class, $mockGuard);
+
+    $this->actingAs($admin);
+
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('capacity', 15)
+        ->call('save')
+        ->assertHasErrors(['capacity']);
+
+    expect($room->fresh()->capacity)->toBe(20);
+});
+
+// Tes Tambahan 6: Fail-Closed jika mata pelajaran kelas terpetakan ke kompetensi yang TIDAK AKTIF
+test('fail closed: subject mapped to inactive competency only is rejected', function () {
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create(['department' => 'computer']);
+
+    // Nonaktifkan semua kompetensi bernama 'Adobe Photoshop' atau buat baru yang non-aktif
+    Competency::create([
+        'name' => 'Adobe Photoshop Legacy',
+        'department' => 'computer',
+        'is_active' => false,
+    ]);
+
+    $class = CourseClass::factory()->create([
+        'name' => 'Kelas Photoshop Tua',
+        'subject' => 'Adobe Photoshop Legacy',
+        'student_count' => 10,
+    ]);
+
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-25',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'scheduled',
+    ]);
+
+    $this->actingAs($admin);
+
+    // Coba ganti department ke speakout -> Fail-Closed karena kompetensi tidak aktif
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('formDepartment', 'speakout')
+        ->call('save')
+        ->assertHasErrors(['department']);
+
+    expect($room->fresh()->department)->toBe('computer');
+});
+
+// Tes Tambahan 7: Fail-Closed jika terdapat duplikasi entri kompetensi pada katalog (bahkan jika sama bidang)
+test('fail closed: duplicate competency entries with same name are rejected even if same department', function () {
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create(['department' => 'computer']);
+
+    // Buat dua entri aktif yang memiliki nama sama setelah LOWER(TRIM())
+    Competency::create(['name' => 'Desain Grafis Spesial', 'department' => 'computer', 'is_active' => true]);
+    Competency::create(['name' => '  desain grafis spesial  ', 'department' => 'computer', 'is_active' => true]);
+
+    $class = CourseClass::factory()->create([
+        'name' => 'Kelas Duplikat',
+        'subject' => 'Desain Grafis Spesial',
+        'student_count' => 10,
+    ]);
+
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-25',
+        'start_time' => '13:00',
+        'end_time' => '15:00',
+        'status' => 'scheduled',
+    ]);
+
+    $this->actingAs($admin);
+
+    // Coba ganti department -> Fail-Closed karena duplikasi entri
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('formDepartment', 'speakout')
+        ->call('save')
+        ->assertHasErrors(['department']);
+
+    expect($room->fresh()->department)->toBe('computer');
 });

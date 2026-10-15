@@ -27,6 +27,11 @@ class RoomConflictGuard
     public const NON_OFFICIAL_STATUSES = ['draft', 'pending', 'proposal', 'tentative', 'cancelled'];
 
     /**
+     * Zona waktu operasional kampus untuk penentuan batas waktu jadwal.
+     */
+    public const TIMEZONE = 'Asia/Jakarta';
+
+    /**
      * Validasi apakah perubahan ruangan melanggar jadwal resmi mendatang.
      *
      * @param  Room  $room  Record ruangan di basis data sebelum diperbarui
@@ -45,7 +50,7 @@ class RoomConflictGuard
             return;
         }
 
-        // Ambil seluruh jadwal masa depan yang terkait dengan ruangan ini
+        // Ambil seluruh jadwal masa depan yang terkait dengan ruangan ini berdasarkan WIB
         $upcomingSchedules = $this->getUpcomingSchedulesForRoom($room->id);
 
         if ($upcomingSchedules->isEmpty()) {
@@ -93,7 +98,7 @@ class RoomConflictGuard
             foreach ($officialSchedules as $schedule) {
                 $class = $schedule->courseClass;
 
-                // Fail-Closed jika relasi kelas tidak ada
+                // Fail-Closed jika relasi kelas tidak ada atau subject kosong
                 if (! $class || empty(trim((string) $class->subject))) {
                     $formattedDate = $schedule->date ? Carbon::parse($schedule->date)->format('d/m/Y') : '-';
                     throw ValidationException::withMessages([
@@ -103,26 +108,27 @@ class RoomConflictGuard
 
                 $subjectNormalized = mb_strtolower(trim($class->subject));
 
-                // Cari di katalog kompetensi menggunakan pencocokan pasti LOWER(TRIM())
-                $matches = Competency::whereRaw('LOWER(TRIM(name)) = ?', [$subjectNormalized])->get();
+                // Cari di katalog kompetensi yang aktif menggunakan pencocokan pasti LOWER(TRIM())
+                $matches = Competency::where('is_active', true)
+                    ->whereRaw('LOWER(TRIM(name)) = ?', [$subjectNormalized])
+                    ->get();
 
                 if ($matches->isEmpty()) {
-                    // Fail-Closed: Materi tidak terdaftar di katalog
+                    // Fail-Closed: Materi tidak terdaftar atau non-aktif di katalog
                     $formattedDate = $schedule->date ? Carbon::parse($schedule->date)->format('d/m/Y') : '-';
                     throw ValidationException::withMessages([
-                        'department' => "Perubahan bidang ruangan ditolak (Fail-Closed): Kelas resmi mendatang '{$class->name}' pada {$formattedDate} memiliki mata pelajaran '{$class->subject}' yang belum terdaftar di Master Katalog Kompetensi.",
+                        'department' => "Perubahan bidang ruangan ditolak (Fail-Closed): Kelas resmi mendatang '{$class->name}' pada {$formattedDate} memiliki mata pelajaran '{$class->subject}' yang belum terdaftar atau tidak aktif di Master Katalog Kompetensi.",
                     ]);
                 }
 
-                // Cek apakah ada ambiguitas (lebih dari 1 department berbeda)
-                $departments = $matches->pluck('department')->unique();
-                if ($departments->count() > 1) {
+                // Jika ditemukan duplikasi entri kompetensi (baik berbeda bidang maupun bidang sama), pemetaan tidak dapat dipastikan unik
+                if ($matches->count() > 1) {
                     throw ValidationException::withMessages([
-                        'department' => "Perubahan bidang ruangan ditolak (Fail-Closed): Mata pelajaran '{$class->subject}' terpetakan ke lebih dari satu bidang pada katalog kompetensi.",
+                        'department' => "Perubahan bidang ruangan ditolak (Fail-Closed): Ditemukan duplikasi entri kompetensi untuk mata pelajaran '{$class->subject}' pada katalog. Pemetaan bidang tidak dapat dipastikan secara unik.",
                     ]);
                 }
 
-                $classDepartment = $departments->first();
+                $classDepartment = $matches->first()->department;
 
                 if ($classDepartment !== $newData['department']) {
                     $newDeptLabel = $newData['department'] === 'computer' ? 'Komputer' : 'SpeakOut';
@@ -141,14 +147,23 @@ class RoomConflictGuard
         if ($capacityDecreased) {
             foreach ($officialSchedules as $schedule) {
                 $class = $schedule->courseClass;
-                $studentCount = (int) ($class?->student_count ?? 0);
+
+                // Fail-Closed: Jika data kelas tidak ditemukan atau student_count bernilai null
+                if (! $class || $class->student_count === null) {
+                    $formattedDate = $schedule->date ? Carbon::parse($schedule->date)->format('d/m/Y') : '-';
+                    throw ValidationException::withMessages([
+                        'capacity' => "Penurunan kapasitas ruangan ditolak (Fail-Closed): Terdapat jadwal resmi pada {$formattedDate} dengan data jumlah siswa kelas yang tidak dapat diverifikasi.",
+                    ]);
+                }
+
+                $studentCount = (int) $class->student_count;
 
                 if ($studentCount > (int) $newData['capacity']) {
                     $formattedDate = $schedule->date ? Carbon::parse($schedule->date)->format('d/m/Y') : '-';
                     $timeRange = substr((string) $schedule->start_time, 0, 5).'–'.substr((string) $schedule->end_time, 0, 5).' WIB';
 
                     throw ValidationException::withMessages([
-                        'capacity' => "Penurunan kapasitas menjadi {$newData['capacity']} siswa ditolak karena kelas resmi '{$class?->name}' pada {$formattedDate} jam {$timeRange} memiliki {$studentCount} siswa.",
+                        'capacity' => "Penurunan kapasitas menjadi {$newData['capacity']} siswa ditolak karena kelas resmi '{$class->name}' pada {$formattedDate} jam {$timeRange} memiliki {$studentCount} siswa.",
                     ]);
                 }
             }
@@ -156,21 +171,22 @@ class RoomConflictGuard
     }
 
     /**
-     * Dapatkan semua jadwal mendatang untuk ruangan tertentu.
+     * Dapatkan semua jadwal mendatang untuk ruangan tertentu berdasarkan waktu operasional Asia/Jakarta (WIB).
      *
      * @return Collection<int, Schedule>
      */
     public function getUpcomingSchedulesForRoom(int $roomId): Collection
     {
-        $today = now()->toDateString();
-        $currentTime = now()->format('H:i:s');
+        $nowWib = Carbon::now(self::TIMEZONE);
+        $today = $nowWib->toDateString();
+        $currentTime = $nowWib->format('H:i:s');
 
         return Schedule::query()
             ->with('courseClass')
             ->where('room_id', $roomId)
-            ->where(function (Builder $query) use ($today, $currentTime) {
+            ->where(function (Builder $query) use ($today, $currentTime): void {
                 $query->whereDate('date', '>', $today)
-                    ->orWhere(function (Builder $sub) use ($today, $currentTime) {
+                    ->orWhere(function (Builder $sub) use ($today, $currentTime): void {
                         $sub->whereDate('date', $today)
                             ->where('end_time', '>', $currentTime);
                     });

@@ -72,9 +72,7 @@ class RoomList extends Component
             return;
         }
 
-        if (! auth()->user()->canManageRooms()) {
-            abort(403, 'Aksi tidak diizinkan. Hanya Admin dan BAAK yang berwenang menambah ruangan.');
-        }
+        $this->authorize('create', Room::class);
 
         $this->resetValidation();
         $this->resetErrorBag();
@@ -98,11 +96,8 @@ class RoomList extends Component
             return;
         }
 
-        if (! auth()->user()->canManageRooms()) {
-            abort(403, 'Aksi tidak diizinkan. Hanya Admin dan BAAK yang berwenang mengedit ruangan.');
-        }
-
         $room = Room::findOrFail($id);
+        $this->authorize('update', $room);
 
         $this->resetValidation();
         $this->resetErrorBag();
@@ -165,8 +160,11 @@ class RoomList extends Component
             return;
         }
 
-        if (! auth()->user()->canManageRooms()) {
-            abort(403, 'Aksi tidak diizinkan. Hanya Admin dan BAAK yang berwenang mengelola data ruangan.');
+        if ($this->mode === 'create') {
+            $this->authorize('create', Room::class);
+        } else {
+            $roomToAuthorize = Room::findOrFail($this->roomId);
+            $this->authorize('update', $roomToAuthorize);
         }
 
         // Auto-trim name dan notes
