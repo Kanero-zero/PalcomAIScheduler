@@ -115,14 +115,37 @@ class InstructorController extends Controller
 
             // Sinkronkan Kompetensi
             $competenciesInput = (array) $request->input('competencies', []);
+            $submittedCompetencyIds = collect($competenciesInput)
+                ->pluck('id')
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->all();
 
-            // Hapus kompetensi yang sudah berelasi master yang tidak lagi dipilih
-            $instructor->skills()->whereNotNull('competency_id')->delete();
+            // Ambil ID semua kompetensi master yang saat ini berstatus aktif
+            $activeCompetencyIds = Competency::where('is_active', true)->pluck('id')->all();
 
-            // Insert kompetensi baru yang dipilih
+            // Hapus hanya kompetensi aktif yang tidak lagi dipilih pada formulir.
+            // Kompetensi historis yang nonaktif (tidak termasuk dalam $activeCompetencyIds)
+            // tetap dipertahankan walaupun tidak ada dalam payload formulir.
+            $instructor->skills()
+                ->whereIn('competency_id', $activeCompetencyIds)
+                ->whereNotIn('competency_id', $submittedCompetencyIds)
+                ->delete();
+
+            // Insert atau perbarui kompetensi yang dipilih dari formulir
             foreach ($competenciesInput as $item) {
                 $comp = Competency::find($item['id'] ?? null);
                 if ($comp) {
+                    $existingSkill = $instructor->skills()->where('competency_id', $comp->id)->first();
+                    if ($existingSkill) {
+                        $existingSkill->update([
+                            'skill' => $comp->name,
+                            'level' => $item['level'],
+                        ]);
+
+                        continue;
+                    }
+
                     $existingLegacy = $instructor->skills()->whereNull('competency_id')
                         ->whereRaw('LOWER(TRIM(skill)) = ?', [strtolower(trim($comp->name))])
                         ->first();

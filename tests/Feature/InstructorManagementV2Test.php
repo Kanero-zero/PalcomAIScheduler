@@ -739,3 +739,131 @@ test('regression: empty master catalog renders truthful empty state without fake
         ->assertSee('Belum ada materi kompetensi yang tersedia pada katalog master untuk bidang ini.')
         ->assertDontSee('Microsoft Word');
 });
+
+// Regression: Historical inactive competency is preserved during edit using normal form payload omitting inactive skills
+test('regression: historical inactive competency is preserved during edit using normal form payload omitting inactive skills', function () {
+    $admin = User::factory()->admin()->create();
+
+    $word = Competency::where('name', 'Microsoft Word')->firstOrFail();
+    $excel = Competency::where('name', 'Microsoft Excel')->firstOrFail();
+
+    $inactive = Competency::create([
+        'name' => 'Visual Basic 6.0 (Arsip)',
+        'department' => 'computer',
+        'is_active' => false,
+    ]);
+
+    $instructor = Instructor::factory()->create([
+        'name' => 'Instruktur Pengajar Legasi',
+        'department' => 'computer',
+        'status' => 'active',
+        'notes' => 'Catatan awal',
+    ]);
+
+    // Instruktur sudah memiliki skill aktif (Word: beginner) dan skill arsip historis (VB6: advanced)
+    $instructor->skills()->create([
+        'competency_id' => $word->id,
+        'skill' => $word->name,
+        'level' => 'beginner',
+    ]);
+    $instructor->skills()->create([
+        'competency_id' => $inactive->id,
+        'skill' => $inactive->name,
+        'level' => 'advanced',
+    ]);
+
+    // BAAK mengedit instruktur melalui formulir Edit normal:
+    // Formulir edit hanya menyajikan kompetensi aktif (Word & Excel), sehingga $inactive sama sekali TIDAK ada dalam payload.
+    // BAAK menaikkan level Word menjadi intermediate dan memilih Excel level advanced.
+    $normalEditPayload = [
+        'name' => 'Instruktur Pengajar Legasi (Diperbarui)',
+        'department' => 'computer',
+        'status' => 'active',
+        'notes' => 'Catatan diperbarui oleh BAAK',
+        'competencies' => [
+            ['id' => $word->id, 'level' => 'intermediate'],
+            ['id' => $excel->id, 'level' => 'advanced'],
+        ],
+        'availabilities' => [],
+    ];
+
+    $response = $this->actingAs($admin)->put(route('instructors.update', $instructor), $normalEditPayload);
+    $response->assertRedirect(route('instructors.index'));
+
+    // Pastikan kompetensi historis nonaktif TETAP TERAWAT dan tidak terhapus
+    $this->assertDatabaseHas('instructor_skills', [
+        'instructor_id' => $instructor->id,
+        'competency_id' => $inactive->id,
+        'skill' => 'Visual Basic 6.0 (Arsip)',
+        'level' => 'advanced',
+    ]);
+
+    // Pastikan perubahan kompetensi aktif sesuai tindakan pengguna tersimpan dengan benar
+    $this->assertDatabaseHas('instructor_skills', [
+        'instructor_id' => $instructor->id,
+        'competency_id' => $word->id,
+        'level' => 'intermediate',
+    ]);
+    $this->assertDatabaseHas('instructor_skills', [
+        'instructor_id' => $instructor->id,
+        'competency_id' => $excel->id,
+        'level' => 'advanced',
+    ]);
+
+    // Uji uncheck kompetensi aktif: BAAK mengedit lagi dan menghapus Excel (hanya menyertakan Word)
+    $secondUpdatePayload = [
+        'name' => 'Instruktur Pengajar Legasi (Diperbarui)',
+        'department' => 'computer',
+        'status' => 'active',
+        'competencies' => [
+            ['id' => $word->id, 'level' => 'advanced'],
+        ],
+        'availabilities' => [],
+    ];
+
+    $this->actingAs($admin)->put(route('instructors.update', $instructor), $secondUpdatePayload);
+
+    // Excel terhapus sesuai pilihan pengguna
+    $this->assertDatabaseMissing('instructor_skills', [
+        'instructor_id' => $instructor->id,
+        'competency_id' => $excel->id,
+    ]);
+
+    // Word terupdate menjadi advanced
+    $this->assertDatabaseHas('instructor_skills', [
+        'instructor_id' => $instructor->id,
+        'competency_id' => $word->id,
+        'level' => 'advanced',
+    ]);
+
+    // Kompetensi historis nonaktif MASIH TETAP TERAWAT
+    $this->assertDatabaseHas('instructor_skills', [
+        'instructor_id' => $instructor->id,
+        'competency_id' => $inactive->id,
+        'skill' => 'Visual Basic 6.0 (Arsip)',
+        'level' => 'advanced',
+    ]);
+});
+
+// Regression: Re-running competency seeder does not reactivate intentionally deactivated competency
+test('regression: re-running competency seeder does not reactivate intentionally deactivated competency', function () {
+    // Jalankan seeder awal
+    (new CompetencySeeder)->run();
+
+    $word = Competency::where('name', 'Microsoft Word')->firstOrFail();
+    expect($word->is_active)->toBeTrue();
+
+    // Administrator sengaja menonaktifkan kompetensi
+    $word->update(['is_active' => false]);
+    expect($word->fresh()->is_active)->toBeFalse();
+
+    // Jalankan seeder ulang
+    (new CompetencySeeder)->run();
+
+    // Kompetensi yang sengaja dinonaktifkan TIDAK boleh aktif kembali
+    expect($word->fresh()->is_active)->toBeFalse();
+
+    // Pastikan kompetensi lain yang tidak dinonaktifkan tetap aktif
+    $excel = Competency::where('name', 'Microsoft Excel')->firstOrFail();
+    expect($excel->is_active)->toBeTrue();
+});

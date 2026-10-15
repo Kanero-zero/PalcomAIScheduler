@@ -39,10 +39,16 @@ class CompetencySeeder extends Seeder
         ];
 
         foreach ($competencies as $item) {
-            $comp = Competency::updateOrCreate(
-                ['name' => $item['name']],
-                $item
-            );
+            $comp = Competency::where('name', $item['name'])->first();
+
+            if ($comp) {
+                // Pertahankan status is_active yang sudah ada; jangan aktifkan kembali kompetensi yang sengaja dinonaktifkan
+                $comp->update([
+                    'department' => $item['department'],
+                ]);
+            } else {
+                $comp = Competency::create($item);
+            }
 
             // Backfill matching instructor_skills without losing any records
             InstructorSkill::whereRaw('LOWER(TRIM(skill)) = ?', [strtolower(trim($item['name']))])
