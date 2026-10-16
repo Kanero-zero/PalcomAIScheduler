@@ -32,6 +32,18 @@ return [
 
     'connections' => [
 
+        'demo' => [
+            'driver' => 'sqlite',
+            'url' => null,
+            'database' => database_path('demo.sqlite'),
+            'prefix' => '',
+            'foreign_key_constraints' => true,
+            'busy_timeout' => null,
+            'journal_mode' => null,
+            'synchronous' => null,
+            'transaction_mode' => 'DEFERRED',
+        ],
+
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
