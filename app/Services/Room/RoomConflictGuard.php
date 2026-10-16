@@ -17,14 +17,14 @@ class RoomConflictGuard
      *
      * @var list<string>
      */
-    public const OFFICIAL_STATUSES = ['scheduled'];
+    public const OFFICIAL_STATUSES = ['scheduled', 'rescheduled'];
 
     /**
      * Status non-resmi atau proposal yang tidak mengunci ruangan.
      *
      * @var list<string>
      */
-    public const NON_OFFICIAL_STATUSES = ['draft', 'pending', 'proposal', 'tentative', 'cancelled'];
+    public const NON_OFFICIAL_STATUSES = ['draft', 'pending', 'proposal', 'tentative', 'cancelled', 'completed', 'postponed'];
 
     /**
      * Zona waktu operasional kampus untuk penentuan batas waktu jadwal.

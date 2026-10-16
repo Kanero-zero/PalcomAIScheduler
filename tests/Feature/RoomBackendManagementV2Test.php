@@ -619,6 +619,90 @@ test('R21: schedules with non-official status like draft, pending, or cancelled 
     expect($room->fresh()->status)->toBe('maintenance');
 });
 
+test('R21-B: schedules with completed and postponed status do not lock room', function () {
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create([
+        'name' => 'Lab Multimedia 1',
+        'department' => 'computer',
+        'capacity' => 20,
+        'status' => 'available',
+    ]);
+
+    $class = CourseClass::factory()->create([
+        'name' => 'Kelas Multimedia',
+        'subject' => 'Microsoft Excel',
+        'student_count' => 15,
+    ]);
+
+    // 1. Jadwal dengan status completed dan postponed tidak mengunci
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-25',
+        'start_time' => '09:00',
+        'end_time' => '11:00',
+        'status' => 'completed',
+    ]);
+
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-26',
+        'start_time' => '09:00',
+        'end_time' => '11:00',
+        'status' => 'postponed',
+    ]);
+
+    $this->actingAs($admin);
+
+    // Boleh ubah ke maintenance karena hanya ada completed & postponed
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('formStatus', 'maintenance')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($room->fresh()->status)->toBe('maintenance');
+});
+
+test('R21-C: schedules with rescheduled status lock room', function () {
+    $admin = User::factory()->admin()->create();
+    $room = Room::factory()->create([
+        'name' => 'Lab Multimedia 2',
+        'department' => 'computer',
+        'capacity' => 20,
+        'status' => 'available',
+    ]);
+
+    $class = CourseClass::factory()->create([
+        'name' => 'Kelas Reschedule',
+        'subject' => 'Microsoft Excel',
+        'student_count' => 15,
+    ]);
+
+    Schedule::create([
+        'course_class_id' => $class->id,
+        'instructor_id' => Instructor::factory()->create()->id,
+        'room_id' => $room->id,
+        'date' => '2026-10-27',
+        'start_time' => '09:00',
+        'end_time' => '11:00',
+        'status' => 'rescheduled',
+    ]);
+
+    $this->actingAs($admin);
+
+    Livewire::test(RoomList::class)
+        ->call('openEdit', $room->id)
+        ->set('formStatus', 'maintenance')
+        ->call('save')
+        ->assertHasErrors(['status']);
+
+    expect($room->fresh()->status)->toBe('available');
+});
+
 // R22: Fail-Closed saat materi tidak dikenal atau status jadwal tidak terverifikasi
 test('R22: fail closed rejects risky edits when class subject is uncataloged or status is unverified', function () {
     $admin = User::factory()->admin()->create();
