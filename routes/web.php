@@ -3,7 +3,15 @@
 use App\Http\Controllers\InstructorController;
 use Illuminate\Support\Facades\Route;
 
-Route::view('/', 'welcome')->name('home');
+// Homepage is the login screen for guests; authenticated users go to their dashboard.
+// Keep the existing Fortify /login route and its authentication handlers intact.
+Route::get('/', function () {
+    if (auth()->check()) {
+        return redirect()->route('dashboard');
+    }
+
+    return view('livewire.auth.login');
+})->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
