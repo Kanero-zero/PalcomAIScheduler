@@ -15,7 +15,11 @@ use App\Models\ScheduleProposal;
 use App\Models\ScheduleProposalOption;
 use App\Models\User;
 use App\Services\Scheduling\ProposalApprovalConflictValidator;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 uses(RefreshDatabase::class);
@@ -390,4 +394,271 @@ test('two competing proposals targeting the same instructor in different rooms c
         ->and($proposalY->fresh()->status)->toBe('pending')
         ->and(Schedule::count())->toBe(1)
         ->and(Schedule::where('instructor_id', $instructor->id)->count())->toBe(1);
+});
+
+test('two independent database connections truly competing concurrently are mutually excluded and prevented from double-booking', function () {
+    // 1. Siapkan database SQLite fisik terpisah untuk simulasi dua koneksi PDO nyata
+    $tempDbPath = storage_path('framework/testing/test_concurrency_'.uniqid().'.sqlite');
+    @mkdir(dirname($tempDbPath), 0777, true);
+    touch($tempDbPath);
+
+    Config::set('database.connections.conn_alpha', [
+        'driver' => 'sqlite',
+        'database' => $tempDbPath,
+        'prefix' => '',
+        'foreign_key_constraints' => true,
+        'busy_timeout' => 100, // 100ms timeout untuk menangkap SQLITE_BUSY jika terkunci
+    ]);
+    Config::set('database.connections.conn_beta', [
+        'driver' => 'sqlite',
+        'database' => $tempDbPath,
+        'prefix' => '',
+        'foreign_key_constraints' => true,
+        'busy_timeout' => 100,
+    ]);
+
+    try {
+        Artisan::call('migrate', ['--database' => 'conn_alpha']);
+
+        $validator = app(ProposalApprovalConflictValidator::class);
+
+        // 2. Setup master data melalui koneksi alpha
+        $connAlpha = DB::connection('conn_alpha');
+        $connBeta = DB::connection('conn_beta');
+
+        $baakId = $connAlpha->table('users')->insertGetId([
+            'name' => 'BAAK Concurrency User',
+            'email' => 'baak.multi.conn@palcomtech.ac.id',
+            'password' => bcrypt('secret'),
+            'role' => 'baak',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $aoId = $connAlpha->table('users')->insertGetId([
+            'name' => 'AO Concurrency User',
+            'email' => 'ao.multi.conn@palcomtech.ac.id',
+            'password' => bcrypt('secret'),
+            'role' => 'ao',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $roomId = $connAlpha->table('rooms')->insertGetId([
+            'name' => 'Lab Komputer Concurrency',
+            'department' => 'computer',
+            'capacity' => 25,
+            'status' => 'available',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $competencyId = $connAlpha->table('competencies')->insertGetId([
+            'name' => 'Concurrency Programming',
+            'department' => 'computer',
+            'is_active' => 1,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $instructorId = $connAlpha->table('instructors')->insertGetId([
+            'user_id' => null,
+            'name' => 'Instruktur Concurrency',
+            'department' => 'computer',
+            'status' => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $connAlpha->table('instructor_skills')->insert([
+            'instructor_id' => $instructorId,
+            'competency_id' => $competencyId,
+            'skill' => 'Concurrency Programming',
+            'level' => 'advanced',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $connAlpha->table('instructor_availabilities')->insert([
+            'instructor_id' => $instructorId,
+            'day' => 'Senin',
+            'start_time' => '08:00',
+            'end_time' => '12:00',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $classId = $connAlpha->table('course_classes')->insertGetId([
+            'name' => 'Kelas Concurrency',
+            'subject' => 'Concurrency Programming',
+            'student_count' => 20,
+            'status' => 'active',
+            'department' => 'computer',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // Dua proposal berbeda yang meminta slot waktu yang sama (2026-11-23 09:00 - 11:00)
+        $prop1Id = $connAlpha->table('schedule_proposals')->insertGetId([
+            'requested_by' => $aoId,
+            'course_class_id' => $classId,
+            'title' => 'Proposal 1 Koneksi Alpha',
+            'input_mode' => 'ai_assistant',
+            'department' => 'computer',
+            'class_kind' => 'regular',
+            'student_count' => 20,
+            'start_date' => '2026-11-23',
+            'end_date' => '2027-02-15',
+            'total_meetings' => 24,
+            'session_duration_minutes' => 120,
+            'frequency_per_week' => 2,
+            'status' => 'pending',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $opt1Id = $connAlpha->table('schedule_proposal_options')->insertGetId([
+            'proposal_id' => $prop1Id,
+            'option_label' => 'A',
+            'proposed_schedules_payload' => json_encode([
+                [
+                    'date' => '2026-11-23',
+                    'start_time' => '09:00:00',
+                    'end_time' => '11:00:00',
+                    'room_id' => $roomId,
+                    'instructor_id' => $instructorId,
+                ],
+            ]),
+            'conflicts_count' => 0,
+            'score' => 95,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $prop2Id = $connAlpha->table('schedule_proposals')->insertGetId([
+            'requested_by' => $aoId,
+            'course_class_id' => $classId,
+            'title' => 'Proposal 2 Koneksi Beta',
+            'input_mode' => 'manual_input',
+            'department' => 'computer',
+            'class_kind' => 'regular',
+            'student_count' => 18,
+            'start_date' => '2026-11-23',
+            'end_date' => '2027-02-15',
+            'total_meetings' => 24,
+            'session_duration_minutes' => 120,
+            'frequency_per_week' => 2,
+            'status' => 'pending',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $opt2Id = $connAlpha->table('schedule_proposal_options')->insertGetId([
+            'proposal_id' => $prop2Id,
+            'option_label' => 'A',
+            'proposed_schedules_payload' => json_encode([
+                [
+                    'date' => '2026-11-23',
+                    'start_time' => '09:00:00',
+                    'end_time' => '11:00:00',
+                    'room_id' => $roomId,
+                    'instructor_id' => $instructorId,
+                ],
+            ]),
+            'conflicts_count' => 0,
+            'score' => 90,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        // TAHAP 1: Pembuktian Isolasi Database Saat Transaksi Berjalan (In-Flight Concurrency)
+        // Koneksi Alpha memulai transaksi approval dan mengunci resource
+        $connAlpha->beginTransaction();
+        $connAlpha->table('schedule_approval_decisions')->insert([
+            'proposal_id' => $prop1Id,
+            'round' => 1,
+            'decision_by' => $baakId,
+            'decision' => 'approved',
+            'reason' => 'Alpha approving in-flight',
+            'idempotency_token' => 'token-alpha-inflight',
+            'decided_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $connAlpha->table('schedules')->insert([
+            'course_class_id' => $classId,
+            'meeting_sequence' => 1,
+            'instructor_id' => $instructorId,
+            'room_id' => $roomId,
+            'date' => '2026-11-23 00:00:00',
+            'start_time' => '09:00:00',
+            'end_time' => '11:00:00',
+            'status' => 'scheduled',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $connAlpha->table('schedule_proposals')->where('id', $prop1Id)->update([
+            'selected_option_id' => $opt1Id,
+            'status' => 'approved',
+        ]);
+
+        // Saat transaksi Alpha masih TERBUKA, Koneksi Beta (proses independen lain) mencoba menulis/memproses approval
+        $betaLockedOut = false;
+        try {
+            $connBeta->table('schedule_approval_decisions')->insert([
+                'proposal_id' => $prop2Id,
+                'round' => 1,
+                'decision_by' => $baakId,
+                'decision' => 'approved',
+                'reason' => 'Beta trying to write simultaneously',
+                'idempotency_token' => 'token-beta-simultaneous',
+                'decided_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        } catch (QueryException $e) {
+            $betaLockedOut = true;
+            // SQLite melempar error "database is locked" karena Alpha sedang memegang write lock fisik
+            expect($e->getMessage())->toContain('database is locked');
+        }
+        expect($betaLockedOut)->toBeTrue();
+
+        // TAHAP 2: Koneksi Alpha Commit secara sah
+        $connAlpha->commit();
+
+        // TAHAP 3: Koneksi Beta sekarang mencoba approval setelah lock Alpha dilepas.
+        // Koneksi Beta sekarang dapat mengakses database, tetapi query validasi in-transaction
+        // membaca jadwal resmi yang baru saja ditulis oleh Alpha, sehingga menolak Proposal 2 (Fail-Closed).
+        Config::set('database.default', 'conn_beta');
+        $proposal2Beta = ScheduleProposal::on('conn_beta')->findOrFail($prop2Id);
+        $option2Beta = ScheduleProposalOption::on('conn_beta')->findOrFail($opt2Id);
+        $baakUserBeta = User::on('conn_beta')->findOrFail($baakId);
+
+        $betaValidationFailed = false;
+        try {
+            $validator->executeApprovalWithLock(
+                proposal: $proposal2Beta,
+                option: $option2Beta,
+                baakUser: $baakUserBeta,
+                idempotencyToken: 'token-beta-post-commit'
+            );
+        } catch (ValidationException $e) {
+            $betaValidationFailed = true;
+            expect($e->getMessage())->toContain('Ruangan telah terisi oleh jadwal resmi lain')
+                ->and($e->errors())->toHaveKey('approval');
+        }
+
+        expect($betaValidationFailed)->toBeTrue();
+
+        // Verifikasi Akhir: Jumlah jadwal resmi tetap 1 (ZERO double-booking)
+        expect($connBeta->table('schedules')->count())->toBe(1)
+            ->and($connBeta->table('schedule_proposals')->where('id', $prop1Id)->value('status'))->toBe('approved')
+            ->and($connBeta->table('schedule_proposals')->where('id', $prop2Id)->value('status'))->toBe('pending')
+            ->and($connBeta->table('schedule_approval_decisions')->count())->toBe(1);
+
+    } finally {
+        Config::set('database.default', 'sqlite');
+        DB::disconnect('conn_alpha');
+        DB::disconnect('conn_beta');
+        @unlink($tempDbPath);
+    }
 });
