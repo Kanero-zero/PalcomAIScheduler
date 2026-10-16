@@ -31,6 +31,8 @@ class Schedule extends Model
      */
     protected $fillable = [
         'course_class_id',
+        'curriculum_subject_id',
+        'meeting_sequence',
         'instructor_id',
         'room_id',
         'date',
@@ -46,6 +48,8 @@ class Schedule extends Model
     {
         return [
             'date' => 'date',
+            'curriculum_subject_id' => 'integer',
+            'meeting_sequence' => 'integer',
         ];
     }
 
@@ -55,6 +59,14 @@ class Schedule extends Model
     public function courseClass(): BelongsTo
     {
         return $this->belongsTo(CourseClass::class);
+    }
+
+    /**
+     * Mata pelajaran kurikulum spesifik pada pertemuan ini (modular V2).
+     */
+    public function curriculumSubject(): BelongsTo
+    {
+        return $this->belongsTo(CurriculumSubject::class);
     }
 
     /**

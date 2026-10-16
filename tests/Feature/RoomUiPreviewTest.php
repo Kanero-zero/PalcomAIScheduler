@@ -7,7 +7,7 @@ test('unauthenticated visitors cannot open rooms preview', function () {
     $this->get(route('rooms.index'))->assertRedirect(route('login'));
 });
 
-test('admin rooms preview shows management actions with save intentionally disabled', function () {
+test('admin rooms page shows active management actions', function () {
     $this->actingAs(User::factory()->admin()->create());
     Room::factory()->create(['name' => 'Lab Uji Nyata', 'capacity' => 18, 'status' => 'available']);
 
@@ -21,10 +21,11 @@ test('admin rooms preview shows management actions with save intentionally disab
         ->assertSee('Tambah Ruangan')
         ->assertSee('roomFormDialog')
         ->assertSee('roomDetailDialog')
-        ->assertSee('disabled aria-disabled="true"', false);
+        ->assertSee('Simpan Ruangan')
+        ->assertDontSee('disabled aria-disabled="true"', false);
 });
 
-test('baak rooms preview shows management actions with save intentionally disabled', function () {
+test('baak rooms page shows active management actions', function () {
     $this->actingAs(User::factory()->baak()->create());
     Room::factory()->create(['name' => 'Lab BAAK']);
 
@@ -35,7 +36,8 @@ test('baak rooms preview shows management actions with save intentionally disabl
         ->assertSee('Edit Ruangan')
         ->assertSee('>Edit</button>', false)
         ->assertSee('roomFormDialog')
-        ->assertSee('disabled aria-disabled="true"', false);
+        ->assertSee('Simpan Ruangan')
+        ->assertDontSee('disabled aria-disabled="true"', false);
 });
 
 test('rooms preview hides management actions from users without room management access', function (string $userFactoryState) {
