@@ -11,8 +11,10 @@ use Illuminate\Support\Carbon;
 /**
  * @property int $id
  * @property string $name
+ * @property string|null $department
  * @property int $capacity
  * @property string $status
+ * @property string|null $notes
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -26,8 +28,10 @@ class Room extends Model
      */
     protected $fillable = [
         'name',
+        'department',
         'capacity',
         'status',
+        'notes',
     ];
 
     /**

@@ -132,6 +132,14 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
     }
 
     /**
+     * Tentukan apakah pengguna berwenang menambah atau mengedit data ruangan (Admin dan BAAK).
+     */
+    public function canManageRooms(): bool
+    {
+        return $this->isAdmin() || $this->isBaak();
+    }
+
+    /**
      * Riwayat log aktivitas yang dilakukan oleh pengguna ini.
      *
      * @return HasMany<ActivityLog, $this>

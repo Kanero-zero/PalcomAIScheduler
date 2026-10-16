@@ -25,7 +25,8 @@ it('shows room names, capacity and operational status', function () {
         ->assertSee('Operasional')
         ->assertSee('Tambah Ruangan')
         ->assertSee('Lihat Detail')
-        ->assertSee('disabled aria-disabled="true"', false)
+        ->assertSee('Simpan Ruangan')
+        ->assertDontSee('disabled aria-disabled="true"', false)
         ->assertSee('Status operasional bukan jaminan ruangan kosong')
         ->assertDontSee('Informasi ketersediaan ruangan belum tersedia.');
 });
@@ -105,14 +106,29 @@ it('reflects changed room status on reload without editing the room', function (
         ->assertDontSee('Status Lab Utama: Operasional');
 });
 
-it('does not expose room mutation controls', function () {
-    Room::factory()->create();
-    $this->actingAs(User::factory()->create())
+it('does not expose room mutation controls to AO and Instructor roles', function ($role) {
+    $room = Room::factory()->create([
+        'name' => 'Lab Teori 1',
+        'department' => 'computer',
+        'capacity' => 20,
+        'status' => 'available',
+    ]);
+    $user = User::factory()->create(['role' => $role]);
+
+    $this->actingAs($user)
         ->get(route('rooms.index'))
         ->assertOk()
         ->assertSee('Lihat Detail')
+        ->assertDontSee('+ Tambah Ruangan')
         ->assertDontSee('Tambah Ruangan')
         ->assertDontSee('Edit Ruangan')
         ->assertDontSee('>Edit</button>', false)
         ->assertDontSee('Hapus Ruangan');
-});
+
+    Livewire::actingAs($user)
+        ->test(RoomList::class)
+        ->call('openDetail', $room->id)
+        ->assertSet('isDetailOpen', true)
+        ->assertSet('selectedRoom.name', 'Lab Teori 1')
+        ->assertSee('Detail Ruangan — Lab Teori 1');
+})->with(['staff', 'instructor']);
