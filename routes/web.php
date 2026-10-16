@@ -15,6 +15,8 @@ Route::get('/', function () {
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
+    // F-08/P1: BAAK dashboard V2 preview; preserve operational dashboard and its Livewire component.
+    Route::view('dashboard/v2-preview', 'pages.dashboard-v2-preview')->name('dashboard.v2-preview');
     Route::view('ai-scheduler', 'pages.ai-scheduler')->name('ai-scheduler');
     // F-06/P1: V2 UI preview only; keep existing MVP scheduler untouched.
     Route::view('ai-scheduler/v2-preview', 'pages.ai-scheduler-v2-preview')->name('ai-scheduler.v2-preview');
