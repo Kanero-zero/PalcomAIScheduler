@@ -8,6 +8,8 @@ Route::view('/', 'welcome')->name('home');
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
     Route::view('ai-scheduler', 'pages.ai-scheduler')->name('ai-scheduler');
+    // F-06/P1: V2 UI preview only; keep existing MVP scheduler untouched.
+    Route::view('ai-scheduler/v2-preview', 'pages.ai-scheduler-v2-preview')->name('ai-scheduler.v2-preview');
     Route::view('activity-log', 'pages.activity-log')->name('activity-log');
     Route::view('approval-review', 'pages.approval-review')->name('approval-review');
     Route::view('schedules', 'pages.schedules')->name('schedules.index');
