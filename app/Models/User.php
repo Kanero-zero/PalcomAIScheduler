@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
@@ -147,5 +148,29 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
     public function activityLogs(): HasMany
     {
         return $this->hasMany(ActivityLog::class, 'user_id');
+    }
+
+    /**
+     * Proposal penjadwalan yang diajukan oleh pengguna ini (AO).
+     */
+    public function submittedProposals(): HasMany
+    {
+        return $this->hasMany(ScheduleProposal::class, 'requested_by');
+    }
+
+    /**
+     * Keputusan persetujuan yang ditetapkan oleh pengguna ini (BAAK).
+     */
+    public function approvalDecisions(): HasMany
+    {
+        return $this->hasMany(ScheduleApprovalDecision::class, 'decision_by');
+    }
+
+    /**
+     * Profil instruktur yang tertaut ke akun pengguna ini (jika bertindak sebagai instruktur).
+     */
+    public function instructor(): HasOne
+    {
+        return $this->hasOne(Instructor::class);
     }
 }

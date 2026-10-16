@@ -5,6 +5,7 @@ namespace App\Models;
 use Database\Factories\RoomFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
@@ -50,5 +51,23 @@ class Room extends Model
     public function schedules(): HasMany
     {
         return $this->hasMany(Schedule::class);
+    }
+
+    /**
+     * Entri fasilitas yang dimiliki ruangan ini.
+     */
+    public function roomFacilities(): HasMany
+    {
+        return $this->hasMany(RoomFacility::class);
+    }
+
+    /**
+     * Fasilitas-fasilitas yang tersedia di ruangan ini.
+     */
+    public function facilities(): BelongsToMany
+    {
+        return $this->belongsToMany(Facility::class, 'room_facilities')
+            ->withPivot(['id', 'quantity', 'condition'])
+            ->withTimestamps();
     }
 }

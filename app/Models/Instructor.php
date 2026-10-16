@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 
@@ -32,11 +33,30 @@ class Instructor extends Model
      * @var list<string>
      */
     protected $fillable = [
+        'user_id',
         'name',
         'department',
         'status',
         'notes',
     ];
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'user_id' => 'integer',
+        ];
+    }
+
+    /**
+     * Akun pengguna (login) yang tertaut dengan instruktur ini.
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
 
     /**
      * Skills mastered by this instructor.
