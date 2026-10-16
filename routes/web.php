@@ -20,6 +20,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('ai-scheduler/v2-preview', 'pages.ai-scheduler-v2-preview')->name('ai-scheduler.v2-preview');
     Route::view('activity-log', 'pages.activity-log')->name('activity-log');
     Route::view('approval-review', 'pages.approval-review')->name('approval-review');
+    // F-07/P1: approval V2 preview. Preserve the existing operational approval route.
+    Route::view('approval-review/v2-preview', 'pages.approval-review-v2-preview')->name('approval-review.v2-preview');
     Route::view('schedules', 'pages.schedules')->name('schedules.index');
     Route::view('instructors', 'pages.instructors')->name('instructors.index');
     Route::get('instructors/create', [InstructorController::class, 'create'])->name('instructors.create');

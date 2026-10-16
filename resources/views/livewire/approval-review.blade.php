@@ -96,7 +96,7 @@
             <p x-show="requestError" x-text="requestError" role="alert" class="mt-3 text-sm text-rose-700 dark:text-rose-300"></p>
         <header class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-                <p class="text-xs font-semibold uppercase tracking-widest text-[#1565D8] dark:text-blue-300">PALCOM AI SCHEDULER</p>
+                <p class="text-xs font-semibold uppercase tracking-widest text-[#1565D8] dark:text-blue-300">SCHEDORA AI</p>
                 <h1 class="mt-1 text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl dark:text-white">Approval / Reject</h1>
                 <p class="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">Tinjau dan putuskan instruktur pengganti untuk setiap jadwal kelas terdampak.</p>
             </div>
