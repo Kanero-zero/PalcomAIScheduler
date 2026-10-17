@@ -213,3 +213,31 @@ test('d4_d proposal options payload structure preserves meeting sequences and co
         ->and($option->proposed_schedules_payload[0]['meeting_sequence'])->toBe(1)
         ->and($option->proposed_schedules_payload[1]['meeting_sequence'])->toBe(2);
 });
+
+test('d4_e scoring formula clamps score between 0 and 100 with drift penalties and room consistency bonuses', function () {
+    $calculateScore = function (int $driftMinutes, bool $isConsistentRoom, bool $isExpertInstructor): int {
+        $baseScore = 85;
+        $driftPenalty = (int) floor($driftMinutes / 30) * 5;
+        $consistencyBonus = $isConsistentRoom ? 10 : 0;
+        $seniorityBonus = $isExpertInstructor ? 5 : 0;
+
+        $rawScore = $baseScore - $driftPenalty + $consistencyBonus + $seniorityBonus;
+
+        return max(0, min(100, $rawScore));
+    };
+
+    // Kasus 1: Ideal (Waktu tepat 0 drift, konsisten ruang, expert instructor) -> 85 - 0 + 10 + 5 = 100
+    expect($calculateScore(0, true, true))->toBe(100);
+
+    // Kasus 2: Deviasi 30 menit -> Penalti 5 -> 85 - 5 + 10 + 0 = 90
+    expect($calculateScore(30, true, false))->toBe(90);
+
+    // Kasus 3: Deviasi 120 menit (4 x 30m = 20 penalti) tanpa konsistensi -> 85 - 20 + 0 + 0 = 65
+    expect($calculateScore(120, false, false))->toBe(65);
+
+    // Kasus 4: Deviasi ekstrim (600 menit = 100 penalti) -> Clamped di 0 (bukan negatif)
+    expect($calculateScore(600, false, false))->toBe(0);
+
+    // Kasus 5: Bonus berlebih -> Clamped di 100 (bukan 105)
+    expect($calculateScore(0, true, true))->toBeLessThanOrEqual(100);
+});

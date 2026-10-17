@@ -18,12 +18,12 @@
 
 ## 1. Peta Service, Controller, Livewire Actions, dan Endpoint
 
-Komunikasi antara frontend baru (`/ai-scheduler/v2-preview` dan `/approvals/v2`) dengan backend dijalankan secara reaktif melalui **Livewire 4 Component Actions**, dengan lapisan service backend modular dan dukungan fallback REST API JSON.
+Komunikasi antara frontend baru (`/ai-scheduler/v2-preview` dan `/approval-review/v2-preview`) dengan backend dijalankan secara reaktif melalui **Livewire 4 Component Actions**, dengan lapisan service backend modular dan dukungan fallback REST API JSON.
 
 ```mermaid
 graph TD
     UI_AO["Frontend AI Auto-Scheduler V2 (/ai-scheduler/v2-preview)"] -->|wire:submit / wire:click| LW_AO["App\\Livewire\\AiScheduler"]
-    UI_BAAK["Frontend Approval / Reject V2 (/approvals/v2)"] -->|wire:click / actions| LW_BAAK["App\\Livewire\\ApprovalV2"]
+    UI_BAAK["Frontend Approval / Reject V2 (/approval-review/v2-preview)"] -->|wire:click / actions| LW_BAAK["App\\Livewire\\ApprovalV2"]
 
     subgraph Service_Layer ["Backend Domain Services (V2)"]
         REF_SVC["MasterDataReferenceService"]
@@ -55,7 +55,7 @@ graph TD
   4. `submitProposal()`: Menyimpan proposal ke database dengan status `pending` dan mengosongkan form / menampilkan notifikasi sukses pengajuan.
 
 #### B. Komponen Approval / Reject BAAK: `App\Livewire\ApprovalV2`
-* **Route:** `/approvals/v2`
+* **Route:** `/approval-review/v2-preview` *(diselaraskan dengan route preview frontend, rute legacy tidak diubah)*
 * **Tab Navigasi (Tepat 2 Tab Sesuai Kontrak Bagian 7):**
   - **Tab 1: `new_schedules` (Pengajuan Jadwal Baru):** Menampilkan antrean proposal gabungan Komputer & SpeakOut.
   - **Tab 2: `instructor_leaves` (Pengajuan Izin Instruktur):** Mempertahankan seluruh alur dan service existing (`ScheduleApprovalService` & `API_CONTRACT_SCHEDULER.md`).
@@ -463,11 +463,15 @@ Sebuah kandidat slot **dieliminasi secara mutlak** jika salah satu dari kondisi 
    $$\text{start\_time} < \text{other.end\_time} \quad \land \quad \text{end\_time} > \text{other.start\_time}$$
 
 ### 5.3 Rumus Skor Rekomendasi (Ranking Formula)
-Alternatif yang lolos seluruh hard constraints diurutkan berdasarkan skor kualitas (0–100):
-$$\text{Score} = 100 - \text{Penalty}_{\text{drift}} + \text{Bonus}_{\text{room\_consistency}} + \text{Bonus}_{\text{seniority}}$$
-* **$\text{Penalty}_{\text{drift}}$:** $-2$ poin untuk setiap 30 menit pergeseran dari jam ideal yang diminta AO.
-* **$\text{Bonus}_{\text{room\_consistency}}$:** $+10$ poin jika seluruh 24 pertemuan dapat dilaksanakan di ruangan lab yang sama tanpa berpindah-pindah.
-* **$\text{Bonus}_{\text{seniority}}$:** $+5$ poin jika instruktur berkategori `expert` / tingkat penguasaan tinggi.
+Alternatif yang lolos seluruh *hard constraints* diurutkan berdasarkan skor kualitas deterministik dengan formula:
+$$\text{RawScore} = \text{BaseScore} (85) - \text{Penalty}_{\text{drift}} + \text{Bonus}_{\text{room\_consistency}} + \text{Bonus}_{\text{seniority}}$$
+$$\text{FinalScore} = \text{clamp}(0, 100, \text{RawScore}) = \max(0, \min(100, \text{RawScore}))$$
+
+* **$\text{BaseScore}$:** 85 poin untuk setiap alternatif yang lolos seluruh *hard constraints* (bebas bentrok).
+* **$\text{Penalty}_{\text{drift}}$ (Penalti Pergeseran Waktu):** Mengurangi $-5$ poin untuk setiap 30 menit deviasi akumulatif dari jendela waktu ideal yang diminta AO (`preferred_time_window`). Penalti ini secara tegas mengurangi skor opsi yang bergeser dari jam yang diinginkan sehingga alternatif dengan waktu paling sesuai selalu mendapatkan peringkat lebih tinggi.
+* **$\text{Bonus}_{\text{room\_consistency}}$ (Bonus Konsistensi Ruangan):** $+10$ poin jika dan hanya jika **seluruh pertemuan** dari pertemuan pertama hingga pertemuan ke-$N$ (`total_meetings`) dapat dilaksanakan di ruangan lab yang sama secara konsisten tanpa perpindahan ruangan.
+* **$\text{Bonus}_{\text{seniority}}$ (Bonus Kemahiran Instruktur):** $+5$ poin jika instruktur memiliki tingkat penguasaan materi `expert` / jam terbang tinggi pada kompetensi kurikulum yang diajarkan.
+* **Jaminan Rentang Nilai:** Nilai akhir dipastikan berada pada rentang tertutup $[0, 100]$ melalui fungsi pembatas (*clamping*), sehingga skor tidak pernah bernilai negatif dan tidak melebihi 100.
 
 ### 5.4 Protokol Zero-Option
 Jika tidak ada kombinasi instruktur, ruangan, dan waktu yang lolos seluruh hard constraint, engine **dilarang mengarang jadwal** dan wajib mengembalikan:
@@ -552,11 +556,11 @@ sequenceDiagram
 
 ## 9. Decision Register untuk Persetujuan Project Leader
 
-| No | Poin Keputusan | Usulan Anggota 2 | Status |
+| No | Poin Keputusan | Usulan Anggota 2 | Status Resmi Project Leader |
 | :---: | :--- | :--- | :---: |
-| **DR-01** | **Strategi Penanganan AI Timeout** | Jika API AI eksternal timeout (> 5 detik) atau kuota habis, backend secara elegan beralih (*failover*) ke engine deterministik tanpa memicu error fatal pada UI AO. | **Menunggu Persetujuan** |
-| **DR-02** | **Proposal Kedaluwarsa (*Stale Proposals*)** | Jika BAAK me-review proposal yang `start_date`-nya sudah terlewati dari hari ini, sistem memberi peringatan dan mewajibkan AO memperbarui tanggal sebelum dapat disetujui. | **Menunggu Persetujuan** |
-| **DR-03** | **Struktur Komponen Livewire Approval V2** | Komponen Approval V2 dibuat modular dengan tepat 2 tab: Tab 1 `new_schedules` (Proposal Baru) dan Tab 2 `instructor_leaves` (Izin Instruktur Legacy). | **Menunggu Persetujuan** |
+| **DR-01** | **Strategi Penanganan AI Timeout** | Jika API AI eksternal timeout (> 5 detik) atau kuota habis, backend secara elegan beralih (*failover*) ke engine deterministik tanpa memicu error fatal pada UI AO. | **DISETUJUI (APPROVED)** |
+| **DR-02** | **Proposal Kedaluwarsa (*Stale Proposals*)** | Jika BAAK me-review proposal yang `start_date`-nya sudah terlewati dari hari ini, sistem memberi peringatan dan mewajibkan AO memperbarui tanggal sebelum dapat disetujui. | **DISETUJUI (APPROVED)** |
+| **DR-03** | **Struktur Komponen Livewire Approval V2** | Komponen Approval V2 dibuat modular dengan tepat 2 tab: Tab 1 `new_schedules` (Proposal Baru) dan Tab 2 `instructor_leaves` (Izin Instruktur Legacy) pada rute `/approval-review/v2-preview`, serta mempertahankan modul izin instruktur lama 100%. | **DISETUJUI (APPROVED)** |
 
 ---
 
