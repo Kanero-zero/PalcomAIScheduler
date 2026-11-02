@@ -16,14 +16,16 @@ it('requires email verification to view rooms', function () {
 
 it('shows room names, capacity and operational status', function () {
     Room::factory()->create(['name' => 'Lab Komputer A', 'capacity' => 24, 'status' => 'available']);
-    $this->actingAs(User::factory()->create())
+    $this->actingAs(User::factory()->admin()->create())
         ->get(route('rooms.index'))
         ->assertOk()
         ->assertSeeLivewire(RoomList::class)
         ->assertSee('Lab Komputer A')
         ->assertSee('24 orang')
         ->assertSee('Operasional')
-        ->assertSee('Tampilan hanya baca')
+        ->assertSee('Tambah Ruangan')
+        ->assertSee('Lihat Detail')
+        ->assertSee('disabled aria-disabled="true"', false)
         ->assertSee('Status operasional bukan jaminan ruangan kosong')
         ->assertDontSee('Informasi ketersediaan ruangan belum tersedia.');
 });
@@ -92,9 +94,15 @@ it('reflects changed room status on reload without editing the room', function (
     $room = Room::factory()->create(['name' => 'Lab Utama', 'status' => 'available']);
     $this->actingAs(User::factory()->create());
 
-    Livewire::test(RoomList::class)->assertSee('Operasional')->assertDontSee('Perawatan');
+    Livewire::test(RoomList::class)
+        ->assertSee('Status Lab Utama: Operasional')
+        ->assertDontSee('Status Lab Utama: Perawatan');
+
     $room->update(['status' => 'maintenance']);
-    Livewire::test(RoomList::class)->assertSee('Perawatan')->assertDontSee('Operasional');
+
+    Livewire::test(RoomList::class)
+        ->assertSee('Status Lab Utama: Perawatan')
+        ->assertDontSee('Status Lab Utama: Operasional');
 });
 
 it('does not expose room mutation controls', function () {
@@ -102,6 +110,9 @@ it('does not expose room mutation controls', function () {
     $this->actingAs(User::factory()->create())
         ->get(route('rooms.index'))
         ->assertOk()
+        ->assertSee('Lihat Detail')
         ->assertDontSee('Tambah Ruangan')
+        ->assertDontSee('Edit Ruangan')
+        ->assertDontSee('>Edit</button>', false)
         ->assertDontSee('Hapus Ruangan');
 });
