@@ -1,4 +1,4 @@
-<x-layouts::app :title="__('AI Auto-Scheduler — Preview')">
+<x-layouts::app :title="__('AI Auto-Scheduler')">
     {{-- Patch 4: scoped grid fallback keeps desktop cards side-by-side even before CSS is rebuilt. --}}
     <style>
         #scheduler-example-options { grid-template-columns: minmax(0, 1fr); }
@@ -9,10 +9,14 @@
             #scheduler-example-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
     </style>
-    {{-- Patch 1: navigation shell only; the existing leave scheduler is embedded unchanged. --}}
+    {{-- V2 operates against authenticated endpoints; leave scheduler remains unchanged. --}}
     <main
         x-data="{
             activeTab: 'create',
+            busy: false,
+            notice: '',
+            aiMissing: [],
+            aiModel: '',
             inputMode: 'ai',
             stage: 'draft',
             exampleOptions: [],
@@ -46,59 +50,119 @@
                 }
                 return `${full.format(start)} – ${full.format(end)}`;
             },
-            exampleDates(weekdays, startMinutes) {
-                const d = this.draft;
-                const names = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-                const parts = d.start_date.split('-').map(Number);
-                const endParts = d.end_date.split('-').map(Number);
-                const cursor = new Date(parts[0],parts[1]-1,parts[2],12);
-                const last = new Date(endParts[0],endParts[1]-1,endParts[2],12);
-                const minutes = Number(d.session_duration_minutes);
-                const fmt = value => `${String(Math.floor(value / 60)).padStart(2,'0')}:${String(value % 60).padStart(2,'0')}`;
-                const result = [];
-                let attempts = 0;
-                while (cursor <= last && result.length < Number(d.total_meetings) && attempts < 731) {
-                    if (weekdays.includes(names[cursor.getDay()])) {
-                        const iso = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,'0')}-${String(cursor.getDate()).padStart(2,'0')}`;
-                        result.push({ number:result.length+1,iso,date:this.formatExampleDate(iso),start:fmt(startMinutes),end:fmt(startMinutes+minutes) });
-                    }
-                    cursor.setDate(cursor.getDate()+1);
-                    attempts++;
+            async requestApi(path, payload) {
+                const token = document.querySelector('meta[name=csrf-token]')?.content;
+                const response = await fetch(path, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': token || ''
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    const first = Object.values(result.errors || {}).flat()[0];
+                    throw new Error(first || result.message || `Server gagal merespons (HTTP ${response.status}).`);
                 }
-                return result.length === Number(d.total_meetings) ? result : [];
+                return result;
             },
-            previewExampleOptions() {
+            canonicalDraft() {
+                const days = {monday:'Senin',tuesday:'Selasa',wednesday:'Rabu',thursday:'Kamis',friday:'Jumat',saturday:'Sabtu'};
+                return {
+                    ...this.draft,
+                    input_mode: this.draft.input_mode,
+                    student_count: Number(this.draft.student_count),
+                    total_meetings: Number(this.draft.total_meetings),
+                    frequency_per_week: Number(this.draft.frequency_per_week),
+                    session_duration_minutes: Number(this.draft.session_duration_minutes),
+                    preferred_weekdays: (this.draft.preferred_weekdays || []).map(day => days[day] || day),
+                    preferred_time_window: {...this.draft.preferred_time_window},
+                    required_competency_ids: this.draft.required_competency_ids || []
+                };
+            },
+            async interpretPrompt() {
+                if (this.busy) return;
+                this.notice = '';
+                this.aiMissing = [];
+                this.busy = true;
+                try {
+                    const result = await this.requestApi('/ai-scheduler/v2/interpret', {prompt:this.draft.ai_prompt});
+                    const fields = result.ai.fields || {};
+                    const inverseDays = {Senin:'monday',Selasa:'tuesday',Rabu:'wednesday',Kamis:'thursday',Jumat:'friday',Sabtu:'saturday'};
+                    for (const [name, value] of Object.entries(fields)) {
+                        if (name === 'preferred_weekdays') this.draft.preferred_weekdays = value.map(day => inverseDays[day]).filter(Boolean);
+                        else if (name === 'preferred_time_window') this.draft.preferred_time_window = {...this.draft.preferred_time_window, ...value};
+                        else this.draft[name] = value;
+                    }
+                    this.draft.input_mode = 'ai_assistant';
+                    this.aiMissing = result.ai.missing_fields || [];
+                    this.aiModel = result.ai.model || '';
+                    this.validationChecked = false;
+                    this.notice = `${result.ai.summary} Periksa semua parameter sebelum mencari jadwal.`;
+                } catch (error) {
+                    this.notice = error.message;
+                } finally {
+                    this.busy = false;
+                }
+            },
+            async searchReal() {
+                if (this.busy) return;
                 this.checkDraft();
-                if (this.draftErrors.length) { this.inputMode = 'manual'; this.draft.input_mode = 'manual_input'; return; }
-                const d = this.draft;
-                const allDays = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-                const frequency = Number(d.frequency_per_week);
-                const days = d.preferred_weekdays.length ? [...new Set(d.preferred_weekdays)].slice(0,frequency) : ['monday','wednesday','friday','tuesday','thursday','saturday'].slice(0,frequency);
-                const baseTime = d.preferred_time_window.start || '16:00';
-                const [hour,minute] = baseTime.split(':').map(Number);
-                const baseMinutes = hour*60+minute;
-                const shift = (input, amount) => input.map(day => allDays[(allDays.indexOf(day)+amount)%7]);
-                const designs = [
-                    {id:'A',label:'Opsi A',subtitle:'Mengikuti preferensi hari',weekdays:days,time:baseMinutes},
-                    {id:'B',label:'Opsi B',subtitle:'Contoh alternatif hari & jam',weekdays:shift(days,1),time:baseMinutes-60},
-                    {id:'C',label:'Opsi C',subtitle:'Contoh alternatif hari & jam',weekdays:shift(days,2),time:baseMinutes+60}
-                ];
-                this.exampleOptions = designs.filter(item => item.time >= 0 && item.time+Number(d.session_duration_minutes) <= 1440).map(item => ({
-                    ...item,
-                    dayLabel: item.weekdays.map(day => this.weekdayLabels[day]).join(' & '),
-                    sessions: this.exampleDates(item.weekdays,item.time),
-                    rationale: `${item.subtitle}. Susunan tanggal hanya ilustrasi berdasarkan parameter formulir; belum diverifikasi terhadap jadwal resmi, ketersediaan instruktur, atau ruangan.`
-                })).filter(item => item.sessions.length === Number(d.total_meetings));
-                this.expandedOptionId = null;
-                this.selectedOptionId = null;
-                if (!this.exampleOptions.length) {
-                    this.draftErrors = ['Belum dapat membuat contoh tanggal lengkap pada rentang dan frekuensi ini. Perpanjang periode atau sesuaikan jumlah pertemuan.'];
-                    this.validationChecked = true;
-                    this.inputMode = 'manual';
-                    this.draft.input_mode = 'manual_input';
+                if (this.draftErrors.length) {
+                    this.notice = this.draftErrors.join(' ');
                     return;
                 }
-                this.stage = 'recommendations';
+                this.busy = true;
+                this.notice = '';
+                this.exampleOptions = [];
+                try {
+                    const result = await this.requestApi('/ai-scheduler/v2/preview', {draft:this.canonicalDraft()});
+                    this.exampleOptions = (result.options || []).map(option => {
+                        const sessions = option.proposed_schedules_payload.map(slot => ({
+                            number:slot.meeting_sequence, iso:slot.date, date:this.formatExampleDate(slot.date),
+                            start:slot.start_time.slice(0,5), end:slot.end_time.slice(0,5),
+                            instructor:slot.instructor_name, room:slot.room_name, subject:slot.subject_name
+                        }));
+                        return {
+                            id:option.option_label, label:`Opsi ${option.option_label}`,
+                            subtitle:`Skor ${option.score} • ${option.conflicts_count} bentrok`,
+                            dayLabel:[...new Set(option.proposed_schedules_payload.map(slot => slot.day_name))].join(' & '),
+                            sessions, rationale:option.explanation, preview_token:option.preview_token,
+                            raw:option
+                        };
+                    });
+                    this.selectedOptionId = null;
+                    this.expandedOptionId = null;
+                    if (!this.exampleOptions.length) {
+                        this.notice = (result.reasons || []).join(' ') || 'Tidak ada jadwal valid untuk parameter ini.';
+                        return;
+                    }
+                    this.stage = 'recommendations';
+                    this.notice = `${this.exampleOptions.length} opsi valid ditemukan berdasarkan data instruktur dan ruangan saat ini.`;
+                } catch (error) {
+                    this.notice = error.message;
+                } finally {
+                    this.busy = false;
+                }
+            },
+            async submitReal() {
+                if (this.busy || !this.selectedOption()?.preview_token) return;
+                this.busy = true;
+                this.notice = '';
+                try {
+                    const result = await this.requestApi('/ai-scheduler/v2/submit', {
+                        draft:this.canonicalDraft(), option_label:this.selectedOptionId,
+                        preview_token:this.selectedOption().preview_token
+                    });
+                    this.notice = `Proposal #${result.proposal_id} tersimpan dengan status pending. Belum menjadi jadwal resmi.`;
+                } catch (error) {
+                    this.notice = error.message;
+                } finally {
+                    this.busy = false;
+                }
             },
             chooseExample(id) {
                 if (!this.exampleOptions.some(option => option.id === id)) return;
@@ -120,7 +184,7 @@
                 frequency_per_week: 2,
                 session_duration_minutes: 120,
                 preferred_weekdays: ['monday', 'wednesday'],
-                preferred_time_window: { start: '16:00', end: '18:00' },
+                preferred_time_window: { start: '14:00', end: '16:00' },
                 preferred_instructor_id: null,
                 preferred_room_id: null,
                 required_facility_codes: [],
@@ -154,7 +218,7 @@
                     </p>
                 </div>
                 <span class="inline-flex shrink-0 items-center rounded-full bg-[#FFC928] px-3 py-1.5 text-xs font-bold text-[#0A3D91]">
-                    UI PREVIEW
+                    GEMINI + ENGINE G3
                 </span>
             </div>
         </header>
@@ -191,6 +255,7 @@
             x-show="activeTab === 'create'"
             class="space-y-5"
         >
+            <div x-show="notice" x-text="notice" aria-live="polite" role="status" class="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900"></div>
             <div class="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs font-medium text-zinc-500 dark:text-zinc-400" aria-label="Tahapan pengajuan jadwal">
                 <span :aria-current="stage === 'draft' ? 'step' : null" :class="stage === 'draft' ? 'font-bold text-[#1565D8] dark:text-blue-300' : ''">01&nbsp; Kebutuhan Kelas</span>
                 <span aria-hidden="true" class="px-1">›</span>
@@ -229,7 +294,7 @@
                 </div>
             </div>
 
-            {{-- Patch 2: single shared draft. Neither mode calls an API nor writes schedules. --}}
+            {{-- Draft shared by Gemini parsing and manual mode. --}}
             <section
                 x-show="inputMode === 'ai'"
                 aria-label="AI Assistant - input kebutuhan jadwal"
@@ -240,7 +305,7 @@
                         <h3 class="text-base font-bold text-zinc-900 dark:text-zinc-100">AI Assistant</h3>
                         <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Sampaikan kebutuhan kelas dengan bahasa sehari-hari.</p>
                     </div>
-                    <span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">Mode Preview — AI belum terhubung</span>
+                    <span class="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">Pemrosesan Gemini API</span>
                 </div>
                 <div class="space-y-5 p-4 sm:p-5">
                     <div class="flex items-start gap-3">
@@ -251,7 +316,7 @@
                     </div>
                     <div class="ml-auto max-w-[92%] rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm leading-relaxed text-zinc-800 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-100">
                         Carikan jadwal kelas Microsoft Excel untuk 10 siswa, mulai November 2026, dua kali seminggu pada sore hari.
-                        <p class="mt-1 text-[11px] text-blue-600 dark:text-blue-300">Contoh pesan — bukan percakapan AI sungguhan</p>
+                        <p class="mt-1 text-[11px] text-blue-600 dark:text-blue-300">Contoh permintaan; ketik instruksi Anda sendiri di bawah</p>
                     </div>
                     <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
                         <div class="mb-3 flex items-center justify-between gap-3">
@@ -264,16 +329,19 @@
                             <div><dt class="text-xs text-zinc-500 dark:text-zinc-400">Tanggal Mulai</dt><dd class="mt-1 font-semibold text-zinc-800 dark:text-zinc-100" x-text="draft.start_date || 'Belum diisi'"></dd></div>
                             <div><dt class="text-xs text-zinc-500 dark:text-zinc-400">Frekuensi</dt><dd class="mt-1 font-semibold text-zinc-800 dark:text-zinc-100" x-text="draft.frequency_per_week + ' kali/minggu'"></dd></div>
                         </dl>
-                        <p class="mt-3 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">Ringkasan ini membaca objek draft yang sama dengan formulir. Tidak ada data yang diambil dari database.</p>
+                        <p class="mt-3 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">Ringkasan draft. Opsi jadwal akan divalidasi terhadap data resmi dari database saat pencarian.</p>
                     </div>
                     <div class="space-y-2">
                         <label for="ai-scheduler-prompt" class="block text-sm font-semibold text-zinc-800 dark:text-zinc-200">Permintaan Anda</label>
                         <textarea id="ai-scheduler-prompt" x-model="draft.ai_prompt" rows="3" placeholder="Misal: Carikan kelas SpeakOut untuk 5 siswa pada sore hari..." class="block w-full rounded-xl border border-zinc-300 bg-white p-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-[#1565D8] focus:ring-[#1565D8] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"></textarea>
-                        <p class="text-xs text-zinc-500 dark:text-zinc-400">Permintaan tersimpan dalam draft lokal. Penerjemahan teks ke parameter membutuhkan integrasi AI API pada tahap backend.</p>
+                        <p class="text-xs text-zinc-500 dark:text-zinc-400">Gemini akan mengekstrak parameter dari pesan ini. Periksa dan lengkapi data yang belum disebutkan sebelum mencari jadwal.</p>
                     </div>
                     <div class="flex flex-wrap justify-end gap-2">
                         <button type="button" @click="inputMode = 'manual'; draft.input_mode = 'manual_input'" class="rounded-lg border border-[#1565D8] px-4 py-2 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-[#1565D8] dark:hover:bg-blue-950/40">Lengkapi melalui Input Manual</button>
-                        <button type="button" disabled aria-disabled="true" class="cursor-not-allowed rounded-lg bg-[#1565D8] px-4 py-2 text-sm font-semibold text-white opacity-50">Kirim ke AI</button>
+                        <button type="button" @click="interpretPrompt()" :disabled="busy" class="rounded-lg bg-[#1565D8] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" x-text="busy ? 'Memproses...' : 'Kirim ke Gemini AI'"></button>
+                    </div>
+                    <div x-show="aiMissing.length" class="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" aria-live="polite">
+                        <strong>Perlu dilengkapi:</strong> <span x-text="aiMissing.join(', ')"></span>
                     </div>
                 </div>
             </section>
@@ -328,10 +396,10 @@
                     <fieldset class="space-y-4 border-t border-zinc-100 pt-5 dark:border-zinc-800">
                         <legend class="text-sm font-bold text-[#0A3D91] dark:text-blue-300">Instruktur dan Ruangan</legend>
                         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <div class="space-y-1.5"><label for="scheduler-instructor" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Instruktur (Opsional)</label><select id="scheduler-instructor" disabled aria-disabled="true" class="w-full cursor-not-allowed rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"><option>Otomatis oleh AI — data master belum terhubung</option></select></div>
-                            <div class="space-y-1.5"><label for="scheduler-room" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Ruangan (Opsional)</label><select id="scheduler-room" disabled aria-disabled="true" class="w-full cursor-not-allowed rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"><option>Otomatis oleh AI — data master belum terhubung</option></select></div>
+                            <div class="space-y-1.5"><label for="scheduler-instructor" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Instruktur (Opsional)</label><select id="scheduler-instructor" disabled aria-disabled="true" class="w-full cursor-not-allowed rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"><option>Dipilih otomatis oleh engine dari data master</option></select></div>
+                            <div class="space-y-1.5"><label for="scheduler-room" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Ruangan (Opsional)</label><select id="scheduler-room" disabled aria-disabled="true" class="w-full cursor-not-allowed rounded-lg border border-zinc-300 bg-zinc-100 px-3 py-2.5 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"><option>Dipilih otomatis oleh engine dari data master</option></select></div>
                         </div>
-                        <div class="space-y-1.5"><label for="scheduler-facilities" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Fasilitas yang Dibutuhkan</label><input id="scheduler-facilities" type="text" x-model="draft.facility_notes" placeholder="Contoh: komputer, proyektor, internet" class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-white" /><p class="text-xs text-zinc-500 dark:text-zinc-400">Catatan preview; pilihan fasilitas terstruktur (`required_facility_codes`) akan berasal dari database.</p></div>
+                        <div class="space-y-1.5"><label for="scheduler-facilities" class="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Fasilitas yang Dibutuhkan</label><input id="scheduler-facilities" type="text" x-model="draft.facility_notes" placeholder="Contoh: komputer, proyektor, internet" class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-white" /><p class="text-xs text-zinc-500 dark:text-zinc-400">Catatan ini bersifat informasi; penapisan fasilitas wajib membutuhkan kode fasilitas resmi pada draft.</p></div>
                     </fieldset>
                     <div class="space-y-3 border-t border-zinc-100 pt-5 dark:border-zinc-800">
                         <div class="flex flex-wrap items-center justify-between gap-3">
@@ -348,25 +416,22 @@
 
             <div class="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center sm:justify-between">
                 <p class="max-w-2xl text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-                    Contoh jadwal berikut hanya untuk meninjau desain. AI, validasi bentrok, kompetensi, dan ketersediaan resource belum terhubung.
+                    Opsi berasal dari Scheduling Engine G3. Seluruh pertemuan diperiksa terhadap instruktur, ruang, kompetensi, dan benturan jadwal resmi.
                 </p>
                 <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
-                    <button type="button" @click="previewExampleOptions()" class="min-h-10 w-full rounded-lg border border-[#1565D8] bg-white px-4 py-2 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 dark:bg-zinc-900 dark:hover:bg-blue-950/40 sm:w-auto">
-                        Lihat Contoh Rekomendasi
-                    </button>
-                    <button type="button" disabled aria-disabled="true" class="min-h-10 w-full cursor-not-allowed rounded-lg bg-[#1565D8] px-4 py-2 text-sm font-semibold text-white opacity-50 sm:w-auto">
-                        Cari Alternatif Jadwal
+                    <button type="button" @click="searchReal()" :disabled="busy" class="min-h-10 w-full rounded-lg border border-[#1565D8] bg-white px-4 py-2 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 dark:bg-zinc-900 dark:hover:bg-blue-950/40 sm:w-auto">
+                        Cari Alternatif Jadwal Nyata
                     </button>
                 </div>
             </div>
             </div>{{-- End step 01: shared draft --}}
 
-            {{-- Patch 3: UI-only illustrative alternatives; no engine calls, resource validation, or persistence. --}}
-            <section x-show="stage === 'recommendations'" style="display: none" class="space-y-5" aria-label="Contoh rekomendasi jadwal">
+            {{-- Engine-validated alternatives; pending proposals are non-reserving. --}}
+            <section x-show="stage === 'recommendations'" style="display: none" class="space-y-5" aria-label="Rekomendasi jadwal hasil engine">
                 <div class="flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <h2 class="text-lg font-bold text-zinc-900 dark:text-white">Alternatif Jadwal</h2>
-                        <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Pilih contoh opsi untuk meninjau alur, bukan untuk menetapkan jadwal resmi.</p>
+                        <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Pilih rekomendasi berdasarkan data aktual. Slot belum direservasi hingga disetujui BAAK.</p>
                     </div>
                     <button type="button" @click="stage = 'draft'; expandedOptionId = null" class="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">← Ubah Kebutuhan</button>
                 </div>
@@ -379,11 +444,10 @@
                         <div><dt class="text-xs text-zinc-500">Periode</dt><dd class="mt-1 font-semibold text-zinc-900 dark:text-white" x-text="formatPeriod(draft.start_date, draft.end_date)"></dd></div>
                     </dl>
                 </div>
-                <div class="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200" role="note">
-                    <strong>SIMULASI TAMPILAN — BUKAN REKOMENDASI AI.</strong>
-                    Tanggal dibuat di browser dari draft Anda. Tidak ada skor, pengecekan bentrok, atau penetapan instruktur dan ruangan dari database.
+                <div class="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="note">
+                    Semua opsi berasal dari pemeriksaan engine G3 terhadap database. Status sementara, bukan reservasi resmi.
                 </div>
-                <div id="scheduler-example-options" class="grid min-w-0 grid-cols-1 gap-3" aria-label="Tiga opsi jadwal contoh">
+                <div id="scheduler-example-options" class="grid min-w-0 grid-cols-1 gap-3" aria-label="Rekomendasi jadwal berdasarkan database">
                     <template x-for="option in exampleOptions" :key="option.id">
                         <article class="flex min-w-0 flex-col gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-xs dark:border-zinc-800 dark:bg-zinc-900">
                             <div>
@@ -393,8 +457,8 @@
                             <div class="border-t border-zinc-100 pt-3 text-sm dark:border-zinc-800">
                                 <p class="font-semibold text-zinc-900 dark:text-white" x-text="option.dayLabel"></p>
                                 <p class="mt-1 text-[#1565D8] dark:text-blue-300" x-text="`${option.sessions[0].start}–${option.sessions[0].end} WIB`"></p>
-                                <p class="mt-2 text-xs text-zinc-500" x-text="`${option.sessions.length} pertemuan contoh`"></p>
-                                <p class="mt-1 text-xs text-zinc-500">Instruktur & ruangan: belum ditentukan</p>
+                                <p class="mt-2 text-xs text-zinc-500" x-text="`${option.sessions.length} pertemuan terverifikasi`"></p>
+                                <p class="mt-1 text-xs text-zinc-500"><span x-text="`${option.sessions[0].instructor} • ${option.sessions[0].room}`"></span></p>
                             </div>
                             <div class="mt-auto grid gap-2 pt-1">
                                 <button type="button" @click="expandedOptionId = expandedOptionId === option.id ? null : option.id" :aria-expanded="expandedOptionId === option.id" aria-controls="scheduler-example-option-detail" :aria-label="`Lihat detail ${option.label}`" class="min-h-10 rounded-lg border border-[#1565D8] px-3 py-2 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-[#1565D8] dark:hover:bg-blue-950/40">Lihat Detail</button>
@@ -406,7 +470,7 @@
                 <template x-if="expandedOption()">
                     <div id="scheduler-example-option-detail" class="min-w-0 space-y-4 rounded-2xl border border-[#1565D8] bg-white p-4 dark:bg-zinc-900 sm:p-5">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <div><h3 class="text-lg font-bold text-zinc-900 dark:text-white" x-text="`Detail ${expandedOption().label}`"></h3><p class="text-xs text-zinc-500">Kalender & seluruh pertemuan — data simulasi</p></div>
+                            <div><h3 class="text-lg font-bold text-zinc-900 dark:text-white" x-text="`Detail ${expandedOption().label}`"></h3><p class="text-xs text-zinc-500">Kalender & seluruh pertemuan — data hasil engine</p></div>
                             <button type="button" @click="expandedOptionId = null" class="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700 dark:text-white">Tutup</button>
                         </div>
                         <p class="rounded-lg bg-blue-50 p-3 text-sm text-[#0A3D91] dark:bg-blue-950/40 dark:text-blue-200" x-text="expandedOption().rationale"></p>
@@ -423,7 +487,7 @@
                         <div class="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
                             <table class="w-full min-w-[490px] text-left text-sm">
                                 <thead class="bg-zinc-50 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"><tr><th scope="col" class="px-3 py-2">Ke-</th><th scope="col" class="px-3 py-2">Tanggal</th><th scope="col" class="px-3 py-2">Jam</th><th scope="col" class="px-3 py-2">Instruktur / Ruangan</th></tr></thead>
-                                <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800"><template x-for="meeting in expandedOption().sessions" :key="meeting.iso"><tr><td class="px-3 py-2" x-text="meeting.number"></td><td class="px-3 py-2" x-text="meeting.date"></td><td class="px-3 py-2" x-text="`${meeting.start}–${meeting.end}`"></td><td class="px-3 py-2 text-zinc-500">Belum ditentukan (demo)</td></tr></template></tbody>
+                                <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800"><template x-for="meeting in expandedOption().sessions" :key="meeting.iso"><tr><td class="px-3 py-2" x-text="meeting.number"></td><td class="px-3 py-2" x-text="meeting.date"></td><td class="px-3 py-2" x-text="`${meeting.start}–${meeting.end}`"></td><td class="px-3 py-2 text-zinc-600" x-text="`${meeting.instructor} / ${meeting.room}`"></td></tr></template></tbody>
                             </table>
                         </div>
                         <button type="button" @click="chooseExample(expandedOptionId)" class="min-h-10 w-full rounded-lg bg-[#1565D8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0A3D91] sm:w-auto">Pilih Opsi Ini</button>
@@ -440,7 +504,7 @@
                     <div class="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 sm:p-6">
                         <div class="border-b border-zinc-100 pb-3 dark:border-zinc-800">
                             <p class="text-lg font-bold text-zinc-900 dark:text-white" x-text="`${selectedOption().label} — ${draft.title}`"></p>
-                            <p class="mt-1 text-xs text-amber-700 dark:text-amber-300">Opsi contoh; belum tervalidasi atau dikirim ke BAAK.</p>
+                            <p class="mt-1 text-xs text-amber-700 dark:text-amber-300">Opsi hasil validasi engine; belum diajukan atau disetujui BAAK.</p>
                         </div>
                         <dl class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
                             <div><dt class="text-xs text-zinc-500">Bidang</dt><dd class="mt-1 font-semibold dark:text-white" x-text="draft.department === 'computer' ? 'Komputer' : 'SpeakOut'"></dd></div>
@@ -449,17 +513,17 @@
                             <div><dt class="text-xs text-zinc-500">Pertemuan</dt><dd class="mt-1 font-semibold dark:text-white" x-text="`${draft.total_meetings} kali`"></dd></div>
                             <div><dt class="text-xs text-zinc-500">Hari</dt><dd class="mt-1 font-semibold dark:text-white" x-text="selectedOption().dayLabel"></dd></div>
                             <div><dt class="text-xs text-zinc-500">Jam</dt><dd class="mt-1 font-semibold dark:text-white" x-text="`${selectedOption().sessions[0].start}–${selectedOption().sessions[0].end} WIB`"></dd></div>
-                            <div><dt class="text-xs text-zinc-500">Instruktur</dt><dd class="mt-1 font-semibold dark:text-white">Belum dipilih (demo)</dd></div>
-                            <div><dt class="text-xs text-zinc-500">Ruangan</dt><dd class="mt-1 font-semibold dark:text-white">Belum dipilih (demo)</dd></div>
+                            <div><dt class="text-xs text-zinc-500">Instruktur</dt><dd class="mt-1 font-semibold dark:text-white"><span x-text="selectedOption().sessions[0].instructor"></span></dd></div>
+                            <div><dt class="text-xs text-zinc-500">Ruangan</dt><dd class="mt-1 font-semibold dark:text-white"><span x-text="selectedOption().sessions[0].room"></span></dd></div>
                         </dl>
                     </div>
                 </template>
                 <div class="space-y-2 rounded-xl bg-zinc-50 p-4 dark:bg-zinc-900">
                     <h3 class="text-sm font-bold text-zinc-900 dark:text-white">Alur Persetujuan AO → BAAK</h3>
-                    <p class="text-sm text-zinc-600 dark:text-zinc-300">Saat backend siap: AO mengajukan opsi terpilih sebagai <strong>pending</strong>. Opsi pending tidak mengunci slot. BAAK memeriksa ulang seluruh bentrok sebelum menyetujui atau menolak jadwal.</p>
+                    <p class="text-sm text-zinc-600 dark:text-zinc-300">Pengajuan AO disimpan sebagai <strong>pending</strong>. Belum membuat jadwal resmi. Persetujuan BAAK dilakukan terpisah.</p>
                 </div>
-                <button type="button" disabled aria-disabled="true" class="w-full cursor-not-allowed rounded-lg bg-[#1565D8] px-4 py-3 text-sm font-semibold text-white opacity-50">Ajukan ke BAAK</button>
-                <p class="text-xs text-zinc-500 dark:text-zinc-400">Nonaktif pada preview. Tidak ada pengajuan tersimpan, perubahan status, atau alokasi slot resource.</p>
+                <button type="button" @click="submitReal()" :disabled="busy" class="w-full rounded-lg bg-[#1565D8] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" x-text="busy ? 'Menyimpan...' : 'Ajukan sebagai Pending (AO)'"></button>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">Hanya pengguna dengan peran AO dapat mengajukan. Engine memvalidasi ulang opsi sebelum penyimpanan; tidak membuat jadwal resmi.</p>
             </section>
         </section>
 

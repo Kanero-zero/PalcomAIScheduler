@@ -35,4 +35,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('instructor-leaves', 'pages.instructor-leaves')->name('instructor-leaves.index');
 });
 
+// SCHEDORA V2: AI interpretation, deterministic recommendations, and AO pending proposals.
+// Legacy leave-scheduler endpoints remain unchanged.
+\Illuminate\Support\Facades\Route::middleware(['auth', 'verified', 'throttle:20,1'])->group(function () {
+    \Illuminate\Support\Facades\Route::post('ai-scheduler/v2/interpret', [\App\Http\Controllers\AiSchedulerV2Controller::class, 'interpret'])->name('ai-scheduler.v2-interpret');
+    \Illuminate\Support\Facades\Route::post('ai-scheduler/v2/preview', [\App\Http\Controllers\AiSchedulerV2Controller::class, 'preview'])->name('ai-scheduler.v2-recommendations');
+    \Illuminate\Support\Facades\Route::post('ai-scheduler/v2/submit', [\App\Http\Controllers\AiSchedulerV2Controller::class, 'submit'])->name('ai-scheduler.v2-submit');
+});
+
 require __DIR__.'/settings.php';
