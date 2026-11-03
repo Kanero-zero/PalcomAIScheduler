@@ -2,33 +2,53 @@
 
 use App\Models\User;
 
-test('ai scheduler preview requires login and verified email', function () {
+test('ai scheduler requires login and verified email', function () {
+    $this->get(route('ai-scheduler'))
+        ->assertRedirect(route('login'));
+
+    $this->actingAs(User::factory()->unverified()->create())
+        ->get(route('ai-scheduler'))
+        ->assertRedirect(route('verification.notice'));
+});
+
+test('legacy preview URL preserves access checks and redirects verified users to the main scheduler', function () {
     $this->get(route('ai-scheduler.v2-preview'))
         ->assertRedirect(route('login'));
 
     $this->actingAs(User::factory()->unverified()->create())
         ->get(route('ai-scheduler.v2-preview'))
         ->assertRedirect(route('verification.notice'));
-});
 
-test('ai scheduler preview exposes only the two approved tabs and exclusive input modes', function () {
     $this->actingAs(User::factory()->create())
         ->get(route('ai-scheduler.v2-preview'))
+        ->assertRedirect(route('ai-scheduler'));
+});
+
+test('main scheduler exposes only the two approved tabs and exclusive input modes', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(route('ai-scheduler'))
         ->assertOk()
+        ->assertSee('AI Auto-Scheduler - SCHEDORA AI')
         ->assertSee('Buat Jadwal Kelas')
         ->assertSee('Pergantian Instruktur Izin')
         ->assertSee('AI Assistant')
         ->assertSee('Input Manual')
-        ->assertSee('Cari Alternatif Jadwal')
-        ->assertSee('UI PREVIEW')
+        ->assertSee('Cari Alternatif Jadwal Nyata')
+        ->assertSee('id="scheduler-tab-create"', false)
+        ->assertSee('@click="activeTab = \'create\'"', false)
+        ->assertSee('id="scheduler-panel-create"', false)
+        ->assertSee('id="scheduler-tab-leave"', false)
+        ->assertSee('@click="activeTab = \'leave\'"', false)
+        ->assertSee('id="scheduler-panel-leave"', false)
         ->assertSee("inputMode === 'ai'", false)
         ->assertSee("inputMode === 'manual'", false)
+        ->assertDontSee('AI Auto-Scheduler Preview')
         ->assertDontSee('Kelola Perubahan Jadwal');
 });
 
 test('instructor leave scheduler is embedded in the second tab without rewriting the component', function () {
     $this->actingAs(User::factory()->create())
-        ->get(route('ai-scheduler.v2-preview'))
+        ->get(route('ai-scheduler'))
         ->assertOk()
         ->assertSee('Pilih Pengajuan Izin Instruktur')
         ->assertSee('Jalankan Engine')
@@ -36,20 +56,21 @@ test('instructor leave scheduler is embedded in the second tab without rewriting
         ->assertSee('Tahap 1: Deterministik Aktif');
 });
 
-test('existing ai scheduler route remains available and functional', function () {
+test('main scheduler route renders the V2 interface', function () {
     $this->actingAs(User::factory()->create())
         ->get(route('ai-scheduler'))
         ->assertOk()
+        ->assertSee('Draft Kebutuhan Kelas')
         ->assertSee('Pilih Pengajuan Izin Instruktur');
 });
 
-test('preview offers an editable shared scheduling draft in assistant and manual input', function () {
+test('scheduler offers an editable shared scheduling draft in assistant and manual input', function () {
     $this->actingAs(User::factory()->create())
-        ->get(route('ai-scheduler.v2-preview'))
+        ->get(route('ai-scheduler'))
         ->assertOk()
         ->assertSee('Draft Kebutuhan Kelas')
         ->assertSee('Permintaan Anda')
-        ->assertSee('Kirim ke AI')
+        ->assertSee('Kirim ke Gemini AI')
         ->assertSee('Lengkapi melalui Input Manual')
         ->assertSee('Program / Materi / Level')
         ->assertSee('Jumlah Pertemuan')
@@ -65,54 +86,48 @@ test('preview offers an editable shared scheduling draft in assistant and manual
         ->assertSee('x-model="draft.preferred_weekdays"', false);
 });
 
-test('v2 scheduler preview keeps backend scheduling and approval unavailable', function () {
+test('v2 scheduler keeps browser-only validation warnings and unavailable selectors', function () {
     $this->actingAs(User::factory()->create())
-        ->get(route('ai-scheduler.v2-preview'))
+        ->get(route('ai-scheduler'))
         ->assertOk()
-        ->assertSee('Mode Preview — AI belum terhubung')
+        ->assertSee('Pemeriksaan berikut hanya mengecek kelengkapan draft di browser')
         ->assertSee('Ini bukan hasil analisis AI atau pemeriksaan bentrok jadwal.')
-        ->assertSee('Kirim ke AI')
-        ->assertSee('Cari Alternatif Jadwal')
+        ->assertSee('Dipilih otomatis oleh engine dari data master')
+        ->assertSee('Cari Alternatif Jadwal Nyata')
         ->assertSee('disabled aria-disabled="true"', false);
 });
 
-test('v2 preview offers illustrative A B C options, detail, and final review without persistence', function () {
+test('v2 scheduler provides engine options, detail, and final review before persistence', function () {
     $this->actingAs(User::factory()->create())
-        ->get(route('ai-scheduler.v2-preview'))
+        ->get(route('ai-scheduler'))
         ->assertOk()
         ->assertSee('Ringkasan Kebutuhan Kelas')
-        ->assertSee('Lihat Contoh Rekomendasi')
-        ->assertSee('SIMULASI TAMPILAN — BUKAN REKOMENDASI AI.')
-        ->assertSee('Opsi A')
-        ->assertSee('Opsi B')
-        ->assertSee('Opsi C')
+        ->assertSee('Semua opsi berasal dari pemeriksaan engine G3 terhadap database.')
         ->assertSee('Lihat Detail')
         ->assertSee('Kalender Pertemuan')
         ->assertSee('Daftar Seluruh Pertemuan')
         ->assertSee('Pilih Opsi')
         ->assertSee('Tinjauan Akhir Pengajuan')
         ->assertSee('Alur Persetujuan AO')
-        ->assertSee('Ajukan ke BAAK')
-        ->assertSee('previewExampleOptions()', false)
+        ->assertSee('Ajukan sebagai Pending (AO)')
         ->assertSee('chooseExample(option.id)', false);
 });
 
-test('v2 example preview cannot submit official approval or alter existing leave component', function () {
+test('v2 scheduler keeps pending proposals separate from official approval and preserves the leave component', function () {
     $this->actingAs(User::factory()->create())
-        ->get(route('ai-scheduler.v2-preview'))
+        ->get(route('ai-scheduler'))
         ->assertOk()
-        ->assertSee('Ajukan ke BAAK')
-        ->assertSee('disabled aria-disabled="true"', false)
-        ->assertSee('Tidak ada pengajuan tersimpan')
+        ->assertSee('Ajukan sebagai Pending (AO)')
+        ->assertSee('Belum membuat jadwal resmi.')
         ->assertSee('Pilih Pengajuan Izin Instruktur');
 
     expect(file_get_contents(resource_path('views/pages/ai-scheduler-v2-preview.blade.php')))
         ->toContain('<livewire:ai-scheduler />');
 });
 
-test('v2 preview finalizes responsive option grid and clear steps without enabling persistence', function () {
+test('v2 scheduler retains its responsive option grid and clear steps', function () {
     $this->actingAs(User::factory()->create())
-        ->get(route('ai-scheduler.v2-preview'))
+        ->get(route('ai-scheduler'))
         ->assertOk()
         ->assertSee('id="scheduler-example-options"', false)
         ->assertSee('grid-template-columns: repeat(3, minmax(0, 1fr))', false)
@@ -123,19 +138,15 @@ test('v2 preview finalizes responsive option grid and clear steps without enabli
         ->assertSee('formatPeriod(draft.start_date, draft.end_date)', false)
         ->assertSee('Lihat Detail')
         ->assertSee('Pilih Opsi')
-        ->assertSee('disabled aria-disabled="true"', false)
-        ->assertSee('Ajukan ke BAAK');
+        ->assertSee('Ajukan sebagai Pending (AO)');
 });
 
-test('v2 final polish keeps legacy leave scheduler embedded and official route unchanged', function () {
+test('v2 main page keeps the legacy leave scheduler embedded', function () {
     $this->actingAs(User::factory()->create())
-        ->get(route('ai-scheduler.v2-preview'))
+        ->get(route('ai-scheduler'))
         ->assertOk()
         ->assertSee('Pilih Pengajuan Izin Instruktur')
         ->assertSee('Pergantian Instruktur Izin')
-        ->assertSee('Alur Persetujuan AO');
-
-    $this->get(route('ai-scheduler'))
-        ->assertOk()
+        ->assertSee('Alur Persetujuan AO')
         ->assertSee('Jalankan Engine');
 });

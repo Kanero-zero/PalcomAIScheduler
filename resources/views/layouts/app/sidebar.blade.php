@@ -23,7 +23,7 @@
                     <a href="{{ route('dashboard') }}" class="schedora-nav-item {{ request()->routeIs('dashboard', 'dashboard.v2-preview') ? 'is-active' : '' }}" @if (request()->routeIs('dashboard', 'dashboard.v2-preview')) aria-current="page" @endif data-label="Dashboard" wire:navigate>
                         <flux:icon name="home" class="size-5 shrink-0"/><span class="schedora-item-label">Dashboard</span>
                     </a>
-                    <a href="{{ route('ai-scheduler') }}" class="schedora-nav-item {{ request()->routeIs('ai-scheduler', 'ai-scheduler.v2-preview') ? 'is-active' : '' }}" @if (request()->routeIs('ai-scheduler', 'ai-scheduler.v2-preview')) aria-current="page" @endif data-label="AI Auto-Scheduler" wire:navigate>
+                    <a href="{{ route('ai-scheduler') }}" class="schedora-nav-item {{ request()->routeIs('ai-scheduler') ? 'is-active' : '' }}" @if (request()->routeIs('ai-scheduler')) aria-current="page" @endif data-label="AI Auto-Scheduler" wire:navigate>
                         <flux:icon name="sparkles" class="size-5 shrink-0"/><span class="schedora-item-label">AI Auto-Scheduler</span>
                     </a>
                     <a href="{{ route('approval-review') }}" class="schedora-nav-item {{ request()->routeIs('approval-review', 'approval-review.v2-preview') ? 'is-active' : '' }}" @if (request()->routeIs('approval-review', 'approval-review.v2-preview')) aria-current="page" @endif data-label="Approval / Reject" wire:navigate>

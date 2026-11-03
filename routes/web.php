@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AiSchedulerV2Controller;
 use App\Http\Controllers\InstructorController;
 use Illuminate\Support\Facades\Route;
 
@@ -17,9 +18,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
     // F-08/P1: BAAK dashboard V2 preview; preserve operational dashboard and its Livewire component.
     Route::view('dashboard/v2-preview', 'pages.dashboard-v2-preview')->name('dashboard.v2-preview');
-    Route::view('ai-scheduler', 'pages.ai-scheduler')->name('ai-scheduler');
-    // F-06/P1: V2 UI preview only; keep existing MVP scheduler untouched.
-    Route::view('ai-scheduler/v2-preview', 'pages.ai-scheduler-v2-preview')->name('ai-scheduler.v2-preview');
+    Route::view('ai-scheduler', 'pages.ai-scheduler-v2-preview')->name('ai-scheduler');
+    Route::redirect('ai-scheduler/v2-preview', '/ai-scheduler')->name('ai-scheduler.v2-preview');
     Route::view('activity-log', 'pages.activity-log')->name('activity-log');
     Route::view('approval-review', 'pages.approval-review')->name('approval-review');
     // F-07/P1: approval V2 preview. Preserve the existing operational approval route.
@@ -37,10 +37,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
 // SCHEDORA V2: AI interpretation, deterministic recommendations, and AO pending proposals.
 // Legacy leave-scheduler endpoints remain unchanged.
-\Illuminate\Support\Facades\Route::middleware(['auth', 'verified', 'throttle:20,1'])->group(function () {
-    \Illuminate\Support\Facades\Route::post('ai-scheduler/v2/interpret', [\App\Http\Controllers\AiSchedulerV2Controller::class, 'interpret'])->name('ai-scheduler.v2-interpret');
-    \Illuminate\Support\Facades\Route::post('ai-scheduler/v2/preview', [\App\Http\Controllers\AiSchedulerV2Controller::class, 'preview'])->name('ai-scheduler.v2-recommendations');
-    \Illuminate\Support\Facades\Route::post('ai-scheduler/v2/submit', [\App\Http\Controllers\AiSchedulerV2Controller::class, 'submit'])->name('ai-scheduler.v2-submit');
+Route::middleware(['auth', 'verified', 'throttle:20,1'])->group(function () {
+    Route::post('ai-scheduler/v2/interpret', [AiSchedulerV2Controller::class, 'interpret'])->name('ai-scheduler.v2-interpret');
+    Route::post('ai-scheduler/v2/preview', [AiSchedulerV2Controller::class, 'preview'])->name('ai-scheduler.v2-recommendations');
+    Route::post('ai-scheduler/v2/submit', [AiSchedulerV2Controller::class, 'submit'])->name('ai-scheduler.v2-submit');
 });
 
 require __DIR__.'/settings.php';

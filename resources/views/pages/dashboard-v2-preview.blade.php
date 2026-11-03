@@ -192,7 +192,7 @@
                 <h2 id="dashboard-v2-shortcuts-heading" class="text-base font-bold text-zinc-900 dark:text-white">Akses Cepat</h2>
                 <div class="mt-4 grid gap-2">
                     <a href="{{ route('approval-review') }}" wire:navigate class="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-[#1565D8] dark:border-zinc-700 dark:hover:bg-zinc-800">Buka Approval / Reject (operasional) →</a>
-                    <a href="{{ route('ai-scheduler.v2-preview') }}" wire:navigate class="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-[#1565D8] dark:border-zinc-700 dark:hover:bg-zinc-800">Buka AI Auto-Scheduler V2 Preview →</a>
+                    <a href="{{ route('ai-scheduler') }}" wire:navigate class="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-[#1565D8] dark:border-zinc-700 dark:hover:bg-zinc-800">Buka AI Auto-Scheduler →</a>
                     <a href="{{ route('course-classes.index') }}" wire:navigate class="rounded-xl border border-zinc-200 px-4 py-3 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-[#1565D8] dark:border-zinc-700 dark:hover:bg-zinc-800">Lihat Kelas Kursus →</a>
                 </div>
                 <p class="mt-3 text-xs text-zinc-500 dark:text-zinc-400">Tautan Approval saat ini menggunakan halaman operasional lama. Preview Approval V2 akan diperiksa secara terpisah.</p>
