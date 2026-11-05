@@ -13,6 +13,8 @@ use Database\Seeders\DatabaseSeeder;
 use Livewire\Livewire;
 
 beforeEach(function () {
+    // Keep ScheduleSeeder's relative demo date away from this file's fixed fixtures.
+    $this->travelTo('2026-10-01 08:00:00');
     $this->seed(DatabaseSeeder::class);
     $this->engine = app(SchedulingEngine::class);
 });

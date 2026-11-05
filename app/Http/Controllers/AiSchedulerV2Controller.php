@@ -13,9 +13,23 @@ class AiSchedulerV2Controller extends Controller
 {
     public function interpret(Request $request, GeminiDraftInterpreter $ai): JsonResponse
     {
-        $validated = $request->validate(['prompt' => ['required', 'string', 'min:10', 'max:3000']]);
+        $validated = $request->validate([
+            'message' => ['required_without:prompt', 'string', 'min:1', 'max:3000'],
+            'prompt' => ['required_without:message', 'string', 'min:1', 'max:3000'],
+            'draft' => ['sometimes', 'array'],
+            'history' => ['sometimes', 'array', 'max:12'],
+            'history.*.role' => ['required', 'in:user,assistant'],
+            'history.*.content' => ['required', 'string', 'max:1000'],
+        ]);
         try {
-            return response()->json(['ai' => $ai->interpret($validated['prompt']), 'source' => 'gemini']);
+            return response()->json([
+                'ai' => $ai->interpret(
+                    $validated['message'] ?? $validated['prompt'],
+                    $validated['draft'] ?? [],
+                    $validated['history'] ?? [],
+                ),
+                'source' => 'gemini',
+            ]);
         } catch (RuntimeException $exception) {
             return response()->json(['message' => $exception->getMessage(), 'source' => 'unavailable'], 503);
         }
@@ -24,6 +38,7 @@ class AiSchedulerV2Controller extends Controller
     public function preview(Request $request, ProposalWorkflowService $workflow): JsonResponse
     {
         $data = $request->validate(['draft' => ['required', 'array']]);
+
         // All resource IDs and dates are checked inside the G3 shared normalizer.
         return response()->json($workflow->preview($this->withCatalogCompetency($data['draft'])));
     }
@@ -41,12 +56,17 @@ class AiSchedulerV2Controller extends Controller
             'message' => 'Proposal berhasil disimpan untuk ditinjau BAAK; belum menjadi jadwal resmi.',
             'proposal_id' => $proposal->id,
             'status' => $proposal->status,
-            'selected_option' => $proposal->selectedOption?->option_label,
+            'selected_option' => $data['option_label'],
             'is_official_reserved' => false,
         ], 201);
     }
 
-    /** Resolve a UNIQUE active catalog match; Gemini and browser never supply invented IDs. */
+    /**
+     * Resolve a unique active catalog match; Gemini and browser never supply invented IDs.
+     *
+     * @param  array<string, mixed>  $draft
+     * @return array<string, mixed>
+     */
     private function withCatalogCompetency(array $draft): array
     {
         if (! empty($draft['required_competency_ids']) || ! empty($draft['curriculum_version_id'])) {
@@ -69,5 +89,4 @@ class AiSchedulerV2Controller extends Controller
 
         return $draft;
     }
-
 }
