@@ -45,6 +45,7 @@ class DatabaseSeeder extends Seeder
             InstructorSeeder::class,
             CompetencySeeder::class,
             InstructorSkillSeeder::class,
+            InstructorAvailabilitySeeder::class,
             RoomSeeder::class,
             CourseClassSeeder::class,
             ScheduleSeeder::class,

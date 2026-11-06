@@ -13,11 +13,11 @@ class InstructorSeeder extends Seeder
     public function run(): void
     {
         $instructors = [
-            ['id' => 1, 'name' => 'Wahyu', 'status' => 'active'],
-            ['id' => 2, 'name' => 'Kanero', 'status' => 'active'],
-            ['id' => 3, 'name' => 'Rizky Pratama', 'status' => 'active'],
-            ['id' => 4, 'name' => 'Dina Oktavia', 'status' => 'active'],
-            ['id' => 5, 'name' => 'Budi Santoso', 'status' => 'active'],
+            ['id' => 1, 'name' => 'Wahyu', 'department' => 'computer', 'status' => 'active'],
+            ['id' => 2, 'name' => 'Kanero', 'department' => 'computer', 'status' => 'active'],
+            ['id' => 3, 'name' => 'Rizky Pratama', 'department' => 'computer', 'status' => 'active'],
+            ['id' => 4, 'name' => 'Dina Oktavia', 'department' => 'computer', 'status' => 'active'],
+            ['id' => 5, 'name' => 'Budi Santoso', 'department' => 'computer', 'status' => 'active'],
         ];
 
         foreach ($instructors as $instructor) {

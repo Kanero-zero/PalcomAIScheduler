@@ -13,9 +13,10 @@ class RoomSeeder extends Seeder
     public function run(): void
     {
         $rooms = [
-            ['id' => 1, 'name' => 'Lab 1', 'capacity' => 20, 'status' => 'available'],
-            ['id' => 2, 'name' => 'Lab 2', 'capacity' => 12, 'status' => 'available'],
-            ['id' => 3, 'name' => 'Lab 3', 'capacity' => 16, 'status' => 'available'],
+            ['id' => 1, 'name' => 'Lab 1', 'department' => 'computer', 'capacity' => 20, 'status' => 'available'],
+            ['id' => 2, 'name' => 'Lab 2', 'department' => 'computer', 'capacity' => 12, 'status' => 'available'],
+            ['id' => 3, 'name' => 'Lab 3', 'department' => 'computer', 'capacity' => 16, 'status' => 'available'],
+            // Belum ada keputusan bisnis untuk bidang Ruang Teori 1. Jangan menimpa nilai existing.
             ['id' => 4, 'name' => 'Ruang Teori 1', 'capacity' => 30, 'status' => 'available'],
         ];
 
