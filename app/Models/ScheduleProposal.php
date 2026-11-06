@@ -140,6 +140,17 @@ class ScheduleProposal extends Model
     }
 
     /**
+     * Jadwal resmi yang benar-benar ditulis setelah proposal disetujui.
+     */
+    public function officialSchedules(): HasMany
+    {
+        return $this->hasMany(Schedule::class, 'schedule_proposal_id')
+            ->orderBy('meeting_sequence')
+            ->orderBy('date')
+            ->orderBy('start_time');
+    }
+
+    /**
      * Pengguna pengaju proposal (AO).
      */
     public function requester(): BelongsTo
@@ -193,8 +204,7 @@ class ScheduleProposal extends Model
      */
     public function selectedOption(): BelongsTo
     {
-        return $this->belongsTo(ScheduleProposalOption::class, 'selected_option_id')
-            ->where('proposal_id', $this->id);
+        return $this->belongsTo(ScheduleProposalOption::class, 'selected_option_id');
     }
 
     /**

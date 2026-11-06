@@ -569,6 +569,9 @@ test('two independent database connections truly competing concurrently are mutu
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+        $connAlpha->table('schedule_proposals')->where('id', $prop2Id)->update([
+            'selected_option_id' => $opt2Id,
+        ]);
 
         // TAHAP 1: Pembuktian Isolasi Database Saat Transaksi Berjalan (In-Flight Concurrency)
         // Koneksi Alpha memulai transaksi approval dan mengunci resource

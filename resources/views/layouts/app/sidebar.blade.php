@@ -29,6 +29,11 @@
                     <a href="{{ route('approval-review') }}" class="schedora-nav-item {{ request()->routeIs('approval-review', 'approval-review.v2-preview') ? 'is-active' : '' }}" @if (request()->routeIs('approval-review', 'approval-review.v2-preview')) aria-current="page" @endif data-label="Approval / Reject" wire:navigate>
                         <flux:icon name="check-circle" class="size-5 shrink-0"/><span class="schedora-item-label">Approval / Reject</span>
                     </a>
+                    @if (auth()->user()?->isBaak())
+                        <a href="{{ route('class-proposal-approvals.index') }}" class="schedora-nav-item {{ request()->routeIs('class-proposal-approvals.*') ? 'is-active' : '' }}" @if (request()->routeIs('class-proposal-approvals.*')) aria-current="page" @endif data-label="Persetujuan Kelas Baru">
+                            <flux:icon name="clipboard-document-check" class="size-5 shrink-0"/><span class="schedora-item-label">Persetujuan Kelas Baru</span>
+                        </a>
+                    @endif
                     <a href="{{ route('activity-log') }}" class="schedora-nav-item {{ request()->routeIs('activity-log') ? 'is-active' : '' }}" @if (request()->routeIs('activity-log')) aria-current="page" @endif data-label="Activity Log" wire:navigate>
                         <flux:icon name="clock" class="size-5 shrink-0"/><span class="schedora-item-label">Activity Log</span>
                     </a>

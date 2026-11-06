@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 /**
  * @property int $id
  * @property int $course_class_id
+ * @property int|null $schedule_proposal_id
  * @property int $instructor_id
  * @property int $room_id
  * @property Carbon $date
@@ -31,6 +32,7 @@ class Schedule extends Model
      */
     protected $fillable = [
         'course_class_id',
+        'schedule_proposal_id',
         'curriculum_subject_id',
         'meeting_sequence',
         'instructor_id',
@@ -59,6 +61,14 @@ class Schedule extends Model
     public function courseClass(): BelongsTo
     {
         return $this->belongsTo(CourseClass::class);
+    }
+
+    /**
+     * Proposal kelas baru yang menghasilkan jadwal resmi ini.
+     */
+    public function scheduleProposal(): BelongsTo
+    {
+        return $this->belongsTo(ScheduleProposal::class);
     }
 
     /**

@@ -39,6 +39,12 @@ class AppServiceProvider extends ServiceProvider
                 ? Response::allow()
                 : Response::deny('Hanya pengguna dengan hak akses administrator yang dapat melakukan persetujuan atau penolakan penggantian instruktur.');
         });
+
+        Gate::define('manage-class-proposal-approval', function (User $user): Response {
+            return $user->isBaak()
+                ? Response::allow()
+                : Response::deny('Hanya BAAK yang dapat memproses persetujuan kelas baru.');
+        });
     }
 
     /**

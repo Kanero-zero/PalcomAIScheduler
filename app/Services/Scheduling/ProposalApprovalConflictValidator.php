@@ -54,8 +54,8 @@ class ProposalApprovalConflictValidator
 
         foreach ($proposedSlots as $index => $slot) {
             $date = $slot['date'] ?? null;
-            $startTime = $slot['start_time'] ?? null;
-            $endTime = $slot['end_time'] ?? null;
+            $startTime = $this->normalizeApprovalTime($slot['start_time'] ?? null);
+            $endTime = $this->normalizeApprovalTime($slot['end_time'] ?? null);
             $instructorId = $slot['instructor_id'] ?? null;
             $roomId = $slot['room_id'] ?? null;
 
@@ -63,8 +63,8 @@ class ProposalApprovalConflictValidator
                 $conflicts[] = [
                     'type' => 'malformed_slot',
                     'date' => (string) $date,
-                    'start_time' => (string) $startTime,
-                    'end_time' => (string) $endTime,
+                    'start_time' => (string) ($slot['start_time'] ?? ''),
+                    'end_time' => (string) ($slot['end_time'] ?? ''),
                     'resource_id' => 0,
                     'resource_name' => "Slot #{$index}",
                     'reason' => 'Parameter waktu jadwal tidak lengkap.',
@@ -73,8 +73,32 @@ class ProposalApprovalConflictValidator
                 continue;
             }
 
+            if (! $this->validResourceId($roomId)) {
+                $conflicts[] = [
+                    'type' => 'room_missing',
+                    'date' => $date,
+                    'start_time' => $startTime,
+                    'end_time' => $endTime,
+                    'resource_id' => 0,
+                    'resource_name' => 'Slot #'.($index + 1),
+                    'reason' => 'Slot proposal belum memiliki room_id yang valid.',
+                ];
+            }
+
+            if (! $this->validResourceId($instructorId)) {
+                $conflicts[] = [
+                    'type' => 'instructor_missing',
+                    'date' => $date,
+                    'start_time' => $startTime,
+                    'end_time' => $endTime,
+                    'resource_id' => 0,
+                    'resource_name' => 'Slot #'.($index + 1),
+                    'reason' => 'Slot proposal belum memiliki instructor_id yang valid.',
+                ];
+            }
+
             // A. Validasi Ruangan (Status, Kapasitas, Bidang, Fasilitas, dan Bentrok Jadwal)
-            if ($roomId) {
+            if ($this->validResourceId($roomId)) {
                 $room = Room::find($roomId);
                 if (! $room) {
                     $conflicts[] = [
@@ -163,7 +187,7 @@ class ProposalApprovalConflictValidator
             }
 
             // B. Validasi Instruktur (Status, Bidang, Kompetensi, Ketersediaan, Cuti, dan Bentrok Jadwal)
-            if ($instructorId) {
+            if ($this->validResourceId($instructorId)) {
                 $instructor = Instructor::find($instructorId);
                 if (! $instructor) {
                     $conflicts[] = [
@@ -231,8 +255,8 @@ class ProposalApprovalConflictValidator
 
                         $hasSlot = $instructor->availabilities()
                             ->whereIn('day', $dayLabels)
-                            ->where('start_time', '<=', substr($startTime, 0, 5))
-                            ->where('end_time', '>=', substr($endTime, 0, 5))
+                            ->where('start_time', '<=', $startTime)
+                            ->where('end_time', '>=', $endTime)
                             ->exists();
 
                         if (! $hasSlot) {
@@ -325,20 +349,43 @@ class ProposalApprovalConflictValidator
         string $idempotencyToken,
         ?string $reason = null
     ): ScheduleApprovalDecision {
+        $this->assertBaak($baakUser);
+
         return DB::transaction(function () use ($proposal, $option, $baakUser, $idempotencyToken, $reason): ScheduleApprovalDecision {
             // 1. Guard Idempotensi: Jika token keputusan ini sudah diproses sebelumnya, kembalikan record keputusan
             $existingDecision = ScheduleApprovalDecision::where('idempotency_token', $idempotencyToken)->first();
             if ($existingDecision) {
+                if ($existingDecision->proposal_id !== $proposal->id || $existingDecision->decision !== 'approved') {
+                    throw ValidationException::withMessages([
+                        'idempotency_token' => 'Token idempotensi telah digunakan untuk keputusan lain.',
+                    ]);
+                }
+
                 return $existingDecision;
             }
 
             // 2. Kunci baris proposal untuk isolasi konkurensi
             $lockedProposal = ScheduleProposal::lockForUpdate()->findOrFail($proposal->id);
+            if ($lockedProposal->status !== 'pending') {
+                throw ValidationException::withMessages([
+                    'proposal' => 'Proposal ini sudah diproses dan tidak lagi berstatus pending.',
+                ]);
+            }
+
+            $lockedOption = ScheduleProposalOption::query()
+                ->where('proposal_id', $lockedProposal->id)
+                ->lockForUpdate()
+                ->findOrFail($option->id);
+            if ($lockedProposal->selected_option_id !== $lockedOption->id) {
+                throw ValidationException::withMessages([
+                    'option' => 'Opsi approval bukan opsi terpilih pada proposal.',
+                ]);
+            }
 
             // 3. Kunci seluruh resource (ruangan & instruktur) yang terlibat pada opsi proposal ini
-            $proposedSlots = (array) $option->proposed_schedules_payload;
-            $roomIds = array_filter(array_unique(array_column($proposedSlots, 'room_id')));
-            $instructorIds = array_filter(array_unique(array_column($proposedSlots, 'instructor_id')));
+            $proposedSlots = (array) $lockedOption->proposed_schedules_payload;
+            $roomIds = array_values(array_filter(array_unique(array_column($proposedSlots, 'room_id')), $this->validResourceId(...)));
+            $instructorIds = array_values(array_filter(array_unique(array_column($proposedSlots, 'instructor_id')), $this->validResourceId(...)));
 
             if (! empty($roomIds)) {
                 Room::whereIn('id', $roomIds)->lockForUpdate()->get();
@@ -348,7 +395,7 @@ class ProposalApprovalConflictValidator
             }
 
             // 4. Validasi ulang bentrok secara real-time di dalam transaksi yang terkunci
-            $this->validateOption($lockedProposal, $option, failClosed: true);
+            $this->validateOption($lockedProposal, $lockedOption, failClosed: true);
 
             // 5. Hitung nomor putaran berikutnya
             $nextRound = ((int) $lockedProposal->decisions()->max('round')) + 1;
@@ -365,7 +412,7 @@ class ProposalApprovalConflictValidator
             ]);
 
             // 7. Update status proposal dan opsi terpilih
-            $lockedProposal->selectOption($option);
+            $lockedProposal->selectOption($lockedOption);
             $lockedProposal->update([
                 'status' => 'approved',
             ]);
@@ -383,10 +430,11 @@ class ProposalApprovalConflictValidator
                             'status' => 'active',
                         ]
                     )->id,
+                    'schedule_proposal_id' => $lockedProposal->id,
                     'curriculum_subject_id' => $slot['curriculum_subject_id'] ?? null,
                     'meeting_sequence' => $seq + 1,
-                    'instructor_id' => (int) ($slot['instructor_id'] ?? $lockedProposal->preferred_instructor_id ?? 1),
-                    'room_id' => (int) ($slot['room_id'] ?? $lockedProposal->preferred_room_id ?? 1),
+                    'instructor_id' => (int) $slot['instructor_id'],
+                    'room_id' => (int) $slot['room_id'],
                     'date' => $slot['date'],
                     'start_time' => $slot['start_time'],
                     'end_time' => $slot['end_time'],
@@ -396,5 +444,96 @@ class ProposalApprovalConflictValidator
 
             return $decision;
         });
+    }
+
+    /**
+     * Menolak proposal secara atomik tanpa membuat jadwal resmi.
+     *
+     * @throws ValidationException
+     */
+    public function executeRejectionWithLock(
+        ScheduleProposal $proposal,
+        User $baakUser,
+        string $idempotencyToken,
+        string $reason
+    ): ScheduleApprovalDecision {
+        $this->assertBaak($baakUser);
+        $reason = trim($reason);
+
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                'reason' => 'Alasan penolakan wajib diisi.',
+            ]);
+        }
+
+        return DB::transaction(function () use ($proposal, $baakUser, $idempotencyToken, $reason): ScheduleApprovalDecision {
+            $existingDecision = ScheduleApprovalDecision::where('idempotency_token', $idempotencyToken)->first();
+            if ($existingDecision) {
+                if ($existingDecision->proposal_id !== $proposal->id || $existingDecision->decision !== 'rejected') {
+                    throw ValidationException::withMessages([
+                        'idempotency_token' => 'Token idempotensi telah digunakan untuk keputusan lain.',
+                    ]);
+                }
+
+                return $existingDecision;
+            }
+
+            $lockedProposal = ScheduleProposal::lockForUpdate()->findOrFail($proposal->id);
+            if ($lockedProposal->status !== 'pending') {
+                throw ValidationException::withMessages([
+                    'proposal' => 'Proposal ini sudah diproses dan tidak lagi berstatus pending.',
+                ]);
+            }
+
+            $nextRound = ((int) $lockedProposal->decisions()->max('round')) + 1;
+            $decision = ScheduleApprovalDecision::create([
+                'proposal_id' => $lockedProposal->id,
+                'round' => $nextRound,
+                'decision_by' => $baakUser->id,
+                'decision' => 'rejected',
+                'reason' => $reason,
+                'idempotency_token' => $idempotencyToken,
+                'decided_at' => Carbon::now(),
+            ]);
+
+            $lockedProposal->update(['status' => 'rejected']);
+
+            return $decision;
+        });
+    }
+
+    private function validResourceId(mixed $resourceId): bool
+    {
+        return filter_var($resourceId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) !== false;
+    }
+
+    private function normalizeApprovalTime(mixed $time): ?string
+    {
+        if (! is_string($time)) {
+            return null;
+        }
+
+        $time = trim($time);
+        if (preg_match('/\A(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d\z/D', $time) === 1) {
+            return $time;
+        }
+
+        if (preg_match('/\A(?:[01]\d|2[0-3]):[0-5]\d\z/D', $time) === 1) {
+            return $time.':00';
+        }
+
+        return null;
+    }
+
+    /**
+     * @throws ValidationException
+     */
+    private function assertBaak(User $user): void
+    {
+        if (! $user->isBaak()) {
+            throw ValidationException::withMessages([
+                'authorization' => 'Hanya BAAK yang dapat memproses proposal kelas baru.',
+            ]);
+        }
     }
 }

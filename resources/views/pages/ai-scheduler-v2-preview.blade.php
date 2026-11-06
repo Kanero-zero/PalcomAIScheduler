@@ -14,6 +14,8 @@
     <main
         x-data="schedoraAiChatbot()"
         data-schedora-chatbot
+        data-agent-url="{{ route('ai-scheduler.v2-agent') }}"
+        data-agent-submit-url="{{ route('ai-scheduler.v2-agent-submit') }}"
         data-interpret-url="{{ route('ai-scheduler.v2-interpret') }}"
         data-preview-url="{{ route('ai-scheduler.v2-recommendations') }}"
         data-submit-url="{{ route('ai-scheduler.v2-submit') }}"
@@ -29,7 +31,7 @@
                     </p>
                 </div>
                 <span class="inline-flex shrink-0 items-center rounded-full bg-[#FFC928] px-3 py-1.5 text-xs font-bold text-[#0A3D91]">
-                    GEMINI + ENGINE G3
+                    GEMINI AGENT + G3 MANUAL
                 </span>
             </div>
         </header>
@@ -105,12 +107,12 @@
                 </div>
             </div>
 
-            {{-- Gemini collects requirements conversationally; G3 remains the only recommendation source. --}}
+            {{-- AI mode reasons over allowlisted live context; manual mode retains the G3 workflow. --}}
             <section x-show="inputMode === 'ai'" aria-label="Percakapan Schedora AI" class="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-900">
                 <div class="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-gradient-to-r from-blue-50 to-white p-4 dark:border-zinc-800 dark:from-blue-950/40 dark:to-zinc-900 sm:p-5">
                     <div class="flex items-center gap-3">
                         <div class="relative flex size-10 items-center justify-center rounded-2xl bg-[#1565D8] text-lg text-white shadow-sm" aria-hidden="true">✦<span class="absolute -bottom-0.5 -right-0.5 size-3 rounded-full border-2 border-white bg-emerald-500 dark:border-zinc-900"></span></div>
-                        <div><h3 class="font-bold text-zinc-900 dark:text-white">Schedora AI</h3><p class="text-xs text-zinc-500 dark:text-zinc-400">Gemini • klarifikasi kebutuhan kelas</p></div>
+                        <div><h3 class="font-bold text-zinc-900 dark:text-white">Schedora AI</h3><p class="text-xs text-zinc-500 dark:text-zinc-400">Gemini agent • katalog dan kondisi operasional nyata</p></div>
                     </div>
                     <span class="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-600/20 dark:bg-emerald-950/50 dark:text-emerald-300">Aktif</span>
                 </div>
@@ -120,7 +122,19 @@
                             <template x-for="(message, index) in messages" :key="`${index}-${message.role}`">
                                 <div x-transition:enter="transition duration-300 ease-out" x-transition:enter-start="translate-y-2 opacity-0" x-transition:enter-end="translate-y-0 opacity-100" :class="message.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'" class="flex max-w-[92%] items-end gap-2">
                                     <div x-show="message.role === 'assistant'" class="flex size-7 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-xs text-[#1565D8] dark:bg-blue-950/60 dark:text-blue-300" aria-hidden="true">✦</div>
-                                    <p x-text="message.content" :class="message.role === 'user' ? 'rounded-br-sm bg-[#1565D8] text-white' : 'rounded-bl-sm border border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100'" class="rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-xs"></p>
+                                    <div :class="message.role === 'user' ? 'rounded-br-sm bg-[#1565D8] text-white' : 'rounded-bl-sm border border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100'" class="min-w-0 rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-xs">
+                                        <p x-text="message.content"></p>
+                                        <div x-show="message.recommendations?.length" class="mt-3 grid gap-2">
+                                            <template x-for="option in message.recommendations || []" :key="option.id">
+                                                <article class="rounded-xl border border-blue-200 bg-white p-3 text-zinc-800 shadow-xs dark:border-blue-900 dark:bg-zinc-900 dark:text-zinc-100">
+                                                    <div class="flex items-start justify-between gap-3"><div><p class="font-bold" x-text="option.label"></p><p class="text-[11px] text-zinc-500" x-text="option.subtitle"></p></div><span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">Data nyata</span></div>
+                                                    <p class="mt-2 text-xs font-semibold" x-text="option.dayLabel"></p>
+                                                    <p class="mt-1 text-xs text-zinc-500" x-text="option.sessions.length ? `${option.sessions[0].instructor} • ${option.sessions[0].room} • ${option.sessions[0].start}–${option.sessions[0].end}` : ''"></p>
+                                                    <div class="mt-3 grid grid-cols-2 gap-2"><button type="button" @click="exampleOptions = message.recommendations; expandedOptionId = option.id; stage = 'recommendations'" class="rounded-lg border border-[#1565D8] px-2 py-1.5 text-xs font-semibold text-[#1565D8]">Detail</button><button type="button" @click="exampleOptions = message.recommendations; chooseExample(option.id)" class="rounded-lg bg-[#1565D8] px-2 py-1.5 text-xs font-semibold text-white">Pilih</button></div>
+                                                </article>
+                                            </template>
+                                        </div>
+                                    </div>
                                 </div>
                             </template>
                             <div x-show="busy" x-transition.opacity class="flex items-end gap-2">
@@ -150,7 +164,7 @@
                             <div class="col-span-2 rounded-xl bg-white p-3 ring-1 ring-zinc-200 dark:bg-zinc-800 dark:ring-zinc-700"><dt class="text-[11px] text-zinc-500">Periode</dt><dd class="mt-1 font-semibold dark:text-white" x-text="formatPeriod(draft.start_date, draft.end_date)"></dd></div>
                         </dl>
                         <div x-show="aiMissing.length" class="space-y-2"><p class="text-xs font-semibold text-zinc-700 dark:text-zinc-200">Masih perlu dilengkapi</p><div class="flex flex-wrap gap-1.5"><template x-for="field in aiMissing" :key="field"><span x-text="missingLabels[field] || field" class="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"></span></template></div></div>
-                        <div x-show="aiReady" x-transition class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">Draft percakapan lengkap. Engine G3 siap memeriksa slot nyata.</div>
+                        <div x-show="aiReady" x-transition class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">Schedora AI menemukan rekomendasi yang telah lolos pemeriksaan resource dan konflik database.</div>
                         <button type="button" @click="inputMode = 'manual'; draft.input_mode = 'manual_input'" class="w-full rounded-lg border border-[#1565D8] px-3 py-2 text-xs font-semibold text-[#1565D8] hover:bg-blue-50 dark:hover:bg-blue-950/40">Lengkapi melalui Input Manual</button>
                     </aside>
                 </div>
@@ -224,9 +238,9 @@
                 </form>
             </section>
 
-            <div class="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center sm:justify-between">
+            <div x-show="inputMode === 'manual'" style="display: none" class="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center sm:justify-between">
                 <p class="max-w-2xl text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-                    Opsi berasal dari Scheduling Engine G3. Seluruh pertemuan diperiksa terhadap instruktur, ruang, kompetensi, dan benturan jadwal resmi.
+                    Mode Input Manual menggunakan Scheduling Engine G3. Seluruh pertemuan diperiksa terhadap instruktur, ruang, kompetensi, dan benturan jadwal resmi.
                 </p>
                 <div class="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
                     <button type="button" @click="searchReal()" :disabled="busy" class="min-h-10 w-full rounded-lg border border-[#1565D8] bg-white px-4 py-2 text-sm font-semibold text-[#1565D8] hover:bg-blue-50 dark:bg-zinc-900 dark:hover:bg-blue-950/40 sm:w-auto">
@@ -255,7 +269,7 @@
                     </dl>
                 </div>
                 <div class="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900" role="note">
-                    Semua opsi berasal dari pemeriksaan engine G3 terhadap database. Status sementara, bukan reservasi resmi.
+                    <span x-text="inputMode === 'ai' ? 'Opsi disusun Schedora AI dari resource yang diizinkan backend dan telah diperiksa terhadap database. Status sementara, bukan reservasi resmi.' : 'Semua opsi berasal dari pemeriksaan engine G3 terhadap database. Status sementara, bukan reservasi resmi.'"></span>
                 </div>
                 <div id="scheduler-example-options" class="grid min-w-0 grid-cols-1 gap-3" aria-label="Rekomendasi jadwal berdasarkan database">
                     <template x-for="option in exampleOptions" :key="option.id">

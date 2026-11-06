@@ -1,6 +1,8 @@
 window.schedoraAiChatbot = () => {
     const root = document.querySelector('[data-schedora-chatbot]');
     const config = {
+        agentUrl: root?.dataset.agentUrl,
+        agentSubmitUrl: root?.dataset.agentSubmitUrl,
         interpretUrl: root?.dataset.interpretUrl,
         previewUrl: root?.dataset.previewUrl,
         submitUrl: root?.dataset.submitUrl,
@@ -20,7 +22,7 @@ window.schedoraAiChatbot = () => {
     messages: [
         {
             role: 'assistant',
-            content: 'Halo, saya Schedora. Ceritakan kelas yang ingin dijadwalkan. Saya akan menanyakan detail yang masih kurang sebelum engine mencari slot nyata.',
+            content: 'Halo, saya Schedora. Ceritakan tujuan kelas dan preferensi Anda. Saya dapat membaca katalog serta kondisi operasional untuk menyusun rekomendasi nyata.',
         },
     ],
     exampleOptions: [],
@@ -44,6 +46,7 @@ window.schedoraAiChatbot = () => {
         preferred_instructor_id: null,
         preferred_room_id: null,
         required_facility_codes: [],
+        required_competency_ids: [],
         facility_notes: '',
     },
     missingLabels: {
@@ -154,6 +157,31 @@ window.schedoraAiChatbot = () => {
         }
         this.draft.input_mode = 'ai_assistant';
     },
+    mapOptions(options, source = 'agent') {
+        return (options || []).map((option) => {
+            const sessions = (option.proposed_schedules_payload || []).map((slot) => ({
+                number: slot.meeting_sequence,
+                iso: slot.date,
+                date: this.formatExampleDate(slot.date),
+                start: slot.start_time.slice(0, 5),
+                end: slot.end_time.slice(0, 5),
+                instructor: slot.instructor_name,
+                room: slot.room_name,
+                subject: slot.subject_name,
+            }));
+            return {
+                id: option.option_label,
+                label: `Opsi ${option.option_label}`,
+                subtitle: `Skor ${option.score} • ${option.conflicts_count || 0} bentrok`,
+                dayLabel: [...new Set((option.proposed_schedules_payload || []).map((slot) => slot.day_name))].join(' & '),
+                sessions,
+                rationale: option.explanation,
+                preview_token: option.preview_token,
+                source,
+                raw: option,
+            };
+        });
+    },
     scrollConversation() {
         this.$nextTick(() => {
             if (this.$refs.conversation) this.$refs.conversation.scrollTo({ top: this.$refs.conversation.scrollHeight, behavior: 'smooth' });
@@ -170,17 +198,27 @@ window.schedoraAiChatbot = () => {
         this.busy = true;
         this.scrollConversation();
         try {
-            const result = await this.requestApi(config.interpretUrl, {
+            const result = await this.requestApi(config.agentUrl, {
                 message,
-                draft: this.chatDraft(),
+                current_state: this.chatDraft(),
                 history,
             });
-            this.applyAiFields(result.ai.fields || {});
-            this.aiMissing = result.ai.missing_fields || [];
-            this.aiModel = result.ai.model || '';
-            this.aiReady = Boolean(result.ai.ready_for_preview);
-            this.quickReplies = result.ai.quick_replies || [];
-            this.messages.push({ role: 'assistant', content: result.ai.assistant_message });
+            this.applyAiFields(result.agent.state || {});
+            this.aiMissing = [];
+            this.aiModel = result.agent.model || '';
+            this.quickReplies = result.agent.clarification?.choices || [];
+            const recommendations = this.mapOptions(result.agent.recommendations || [], 'agent');
+            if (recommendations.length) {
+                this.exampleOptions = recommendations;
+                this.selectedOptionId = null;
+                this.expandedOptionId = null;
+            }
+            this.aiReady = recommendations.length > 0;
+            this.messages.push({
+                role: 'assistant',
+                content: result.agent.assistant_message,
+                recommendations,
+            });
             this.validationChecked = false;
         } catch (error) {
             this.notice = error.message;
@@ -192,7 +230,7 @@ window.schedoraAiChatbot = () => {
         }
     },
     async searchReal() {
-        if (this.busy) return;
+        if (this.busy || this.inputMode !== 'manual') return;
         this.checkDraft();
         if (this.draftErrors.length) {
             this.notice = this.draftErrors.join(' ');
@@ -203,28 +241,7 @@ window.schedoraAiChatbot = () => {
         this.exampleOptions = [];
         try {
             const result = await this.requestApi(config.previewUrl, { draft: this.canonicalDraft() });
-            this.exampleOptions = (result.options || []).map((option) => {
-                const sessions = option.proposed_schedules_payload.map((slot) => ({
-                    number: slot.meeting_sequence,
-                    iso: slot.date,
-                    date: this.formatExampleDate(slot.date),
-                    start: slot.start_time.slice(0, 5),
-                    end: slot.end_time.slice(0, 5),
-                    instructor: slot.instructor_name,
-                    room: slot.room_name,
-                    subject: slot.subject_name,
-                }));
-                return {
-                    id: option.option_label,
-                    label: `Opsi ${option.option_label}`,
-                    subtitle: `Skor ${option.score} • ${option.conflicts_count} bentrok`,
-                    dayLabel: [...new Set(option.proposed_schedules_payload.map((slot) => slot.day_name))].join(' & '),
-                    sessions,
-                    rationale: option.explanation,
-                    preview_token: option.preview_token,
-                    raw: option,
-                };
-            });
+            this.exampleOptions = this.mapOptions(result.options || [], 'manual');
             this.selectedOptionId = null;
             this.expandedOptionId = null;
             if (!this.exampleOptions.length) {
@@ -244,8 +261,9 @@ window.schedoraAiChatbot = () => {
         this.busy = true;
         this.notice = '';
         try {
-            const result = await this.requestApi(config.submitUrl, {
-                draft: this.canonicalDraft(),
+            const isAgentOption = this.selectedOption().source === 'agent';
+            const result = await this.requestApi(isAgentOption ? config.agentSubmitUrl : config.submitUrl, {
+                ...(isAgentOption ? {} : { draft: this.canonicalDraft() }),
                 option_label: this.selectedOptionId,
                 preview_token: this.selectedOption().preview_token,
             });

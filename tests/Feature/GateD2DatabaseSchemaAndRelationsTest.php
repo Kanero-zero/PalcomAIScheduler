@@ -407,6 +407,7 @@ test('executeApprovalWithLock runs atomically with concurrency locks and idempot
             ],
         ],
     ]);
+    $proposal->selectOption($option);
 
     $token = 'idempotent-token-approval-123';
 
@@ -432,9 +433,9 @@ test('executeApprovalWithLock runs atomically with concurrency locks and idempot
     expect(Schedule::whereDate('date', '2026-11-02')->where('room_id', $room->id)->count())->toBe(1);
 });
 
-test('all 16 Gate D2 migrations can be rolled back and re-migrated cleanly without syntax or integrity errors', function () {
-    // Jalankan rollback 16 migrasi terbaru
-    $rollbackExit = Artisan::call('migrate:rollback', ['--step' => 16]);
+test('all Gate D2 migrations and the official proposal schedule link can be rolled back and re-migrated cleanly', function () {
+    // Gate D2 terdiri dari 16 migrasi, ditambah relasi jadwal resmi ke proposal.
+    $rollbackExit = Artisan::call('migrate:rollback', ['--step' => 17]);
     expect($rollbackExit)->toBe(0);
 
     // Pastikan tabel-tabel Gate D2 telah dihapus saat rollback
