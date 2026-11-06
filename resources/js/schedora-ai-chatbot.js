@@ -68,6 +68,9 @@ window.schedoraAiChatbot = () => {
     expandedOption() {
         return this.exampleOptions.find((option) => option.id === this.expandedOptionId) ?? null;
     },
+    optionValue(option, field) {
+        return option?.recommended_plan?.[field] ?? this.draft[field];
+    },
     draftProgress() {
         const fields = Object.keys(this.missingLabels);
         const complete = fields.filter((field) => {
@@ -176,6 +179,7 @@ window.schedoraAiChatbot = () => {
                 dayLabel: [...new Set((option.proposed_schedules_payload || []).map((slot) => slot.day_name))].join(' & '),
                 sessions,
                 rationale: option.explanation,
+                recommended_plan: option.recommended_plan || {},
                 preview_token: option.preview_token,
                 source,
                 raw: option,

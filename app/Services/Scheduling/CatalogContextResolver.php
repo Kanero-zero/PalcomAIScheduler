@@ -27,10 +27,13 @@ class CatalogContextResolver
                 && preg_match('/(?:^|\s)'.preg_quote($token, '/').'(?:\s|$)/u', $needle) === 1);
             $coverage = $nameTokens === [] ? 0 : count($matchedTokens) / count($nameTokens);
             $containsFullName = $name !== '' && preg_match('/(?:^|\s)'.preg_quote($name, '/').'(?:\s|$)/u', $needle) === 1;
+            $hasDistinctiveSingleToken = count($matchedTokens) === 1
+                && mb_strlen((string) reset($matchedTokens)) >= 4;
 
             return [
                 'score' => $containsFullName ? 1000 + count($nameTokens) : (int) round($coverage * 100),
-                'eligible' => $containsFullName || ($coverage >= 0.5 && count($matchedTokens) >= min(2, count($nameTokens))),
+                'eligible' => $containsFullName || ($coverage >= 0.5
+                    && (count($matchedTokens) >= min(2, count($nameTokens)) || $hasDistinctiveSingleToken)),
                 'competency' => $this->competencyData($competency),
             ];
         })->filter(fn (array $candidate): bool => $candidate['eligible'])

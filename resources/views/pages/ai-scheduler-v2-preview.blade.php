@@ -130,6 +130,7 @@
                                                     <div class="flex items-start justify-between gap-3"><div><p class="font-bold" x-text="option.label"></p><p class="text-[11px] text-zinc-500" x-text="option.subtitle"></p></div><span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">Data nyata</span></div>
                                                     <p class="mt-2 text-xs font-semibold" x-text="option.dayLabel"></p>
                                                     <p class="mt-1 text-xs text-zinc-500" x-text="option.sessions.length ? `${option.sessions[0].instructor} • ${option.sessions[0].room} • ${option.sessions[0].start}–${option.sessions[0].end}` : ''"></p>
+                                                    <p x-show="Object.keys(option.recommended_plan || {}).length" class="mt-1 text-[11px] text-blue-700 dark:text-blue-300">Schedora memilih pola ini berdasarkan availability dan konflik aktual.</p>
                                                     <div class="mt-3 grid grid-cols-2 gap-2"><button type="button" @click="exampleOptions = message.recommendations; expandedOptionId = option.id; stage = 'recommendations'" class="rounded-lg border border-[#1565D8] px-2 py-1.5 text-xs font-semibold text-[#1565D8]">Detail</button><button type="button" @click="exampleOptions = message.recommendations; chooseExample(option.id)" class="rounded-lg bg-[#1565D8] px-2 py-1.5 text-xs font-semibold text-white">Pilih</button></div>
                                                 </article>
                                             </template>
@@ -264,7 +265,7 @@
                     <dl class="mt-3 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
                         <div><dt class="text-xs text-zinc-500">Materi / Program</dt><dd class="mt-1 font-semibold text-zinc-900 dark:text-white" x-text="draft.title"></dd></div>
                         <div><dt class="text-xs text-zinc-500">Jumlah Siswa</dt><dd class="mt-1 font-semibold text-zinc-900 dark:text-white" x-text="`${draft.student_count} orang`"></dd></div>
-                        <div><dt class="text-xs text-zinc-500">Pertemuan</dt><dd class="mt-1 font-semibold text-zinc-900 dark:text-white" x-text="`${draft.total_meetings} kali`"></dd></div>
+                            <div><dt class="text-xs text-zinc-500">Pertemuan</dt><dd class="mt-1 font-semibold text-zinc-900 dark:text-white" x-text="exampleOptions.length ? `${exampleOptions[0].sessions.length} kali` : `${draft.total_meetings || '—'} kali`"></dd></div>
                         <div><dt class="text-xs text-zinc-500">Periode</dt><dd class="mt-1 font-semibold text-zinc-900 dark:text-white" x-text="formatPeriod(draft.start_date, draft.end_date)"></dd></div>
                     </dl>
                 </div>
@@ -294,7 +295,7 @@
                 <template x-if="expandedOption()">
                     <div id="scheduler-example-option-detail" class="min-w-0 space-y-4 rounded-2xl border border-[#1565D8] bg-white p-4 dark:bg-zinc-900 sm:p-5">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <div><h3 class="text-lg font-bold text-zinc-900 dark:text-white" x-text="`Detail ${expandedOption().label}`"></h3><p class="text-xs text-zinc-500">Kalender & seluruh pertemuan — data hasil engine</p></div>
+                            <div><h3 class="text-lg font-bold text-zinc-900 dark:text-white" x-text="`Detail ${expandedOption().label}`"></h3><p class="text-xs text-zinc-500" x-text="expandedOption().source === 'agent' ? 'Kalender dan seluruh pertemuan — rekomendasi AI tervalidasi' : 'Kalender dan seluruh pertemuan — data hasil engine'"></p></div>
                             <button type="button" @click="expandedOptionId = null" class="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700 dark:text-white">Tutup</button>
                         </div>
                         <p class="rounded-lg bg-blue-50 p-3 text-sm text-[#0A3D91] dark:bg-blue-950/40 dark:text-blue-200" x-text="expandedOption().rationale"></p>
@@ -328,13 +329,13 @@
                     <div class="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 sm:p-6">
                         <div class="border-b border-zinc-100 pb-3 dark:border-zinc-800">
                             <p class="text-lg font-bold text-zinc-900 dark:text-white" x-text="`${selectedOption().label} — ${draft.title}`"></p>
-                            <p class="mt-1 text-xs text-amber-700 dark:text-amber-300">Opsi hasil validasi engine; belum diajukan atau disetujui BAAK.</p>
+                            <p class="mt-1 text-xs text-amber-700 dark:text-amber-300" x-text="selectedOption().source === 'agent' ? 'Opsi AI telah divalidasi backend; belum diajukan atau disetujui BAAK.' : 'Opsi hasil validasi engine; belum diajukan atau disetujui BAAK.'"></p>
                         </div>
                         <dl class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
                             <div><dt class="text-xs text-zinc-500">Bidang</dt><dd class="mt-1 font-semibold dark:text-white" x-text="draft.department === 'computer' ? 'Komputer' : 'SpeakOut'"></dd></div>
-                            <div><dt class="text-xs text-zinc-500">Jenis Kelas</dt><dd class="mt-1 font-semibold dark:text-white" x-text="draft.class_kind === 'regular' ? 'Reguler' : 'Privat'"></dd></div>
+                            <div><dt class="text-xs text-zinc-500">Jenis Kelas</dt><dd class="mt-1 font-semibold dark:text-white" x-text="optionValue(selectedOption(), 'class_kind') === 'regular' ? 'Reguler' : 'Privat'"></dd></div>
                             <div><dt class="text-xs text-zinc-500">Siswa</dt><dd class="mt-1 font-semibold dark:text-white" x-text="`${draft.student_count} orang`"></dd></div>
-                            <div><dt class="text-xs text-zinc-500">Pertemuan</dt><dd class="mt-1 font-semibold dark:text-white" x-text="`${draft.total_meetings} kali`"></dd></div>
+                            <div><dt class="text-xs text-zinc-500">Pertemuan</dt><dd class="mt-1 font-semibold dark:text-white" x-text="`${optionValue(selectedOption(), 'total_meetings') || selectedOption().sessions.length} kali`"></dd></div>
                             <div><dt class="text-xs text-zinc-500">Hari</dt><dd class="mt-1 font-semibold dark:text-white" x-text="selectedOption().dayLabel"></dd></div>
                             <div><dt class="text-xs text-zinc-500">Jam</dt><dd class="mt-1 font-semibold dark:text-white" x-text="`${selectedOption().sessions[0].start}–${selectedOption().sessions[0].end} WIB`"></dd></div>
                             <div><dt class="text-xs text-zinc-500">Instruktur</dt><dd class="mt-1 font-semibold dark:text-white"><span x-text="selectedOption().sessions[0].instructor"></span></dd></div>
@@ -347,7 +348,7 @@
                     <p class="text-sm text-zinc-600 dark:text-zinc-300">Pengajuan AO disimpan sebagai <strong>pending</strong>. Belum membuat jadwal resmi. Persetujuan BAAK dilakukan terpisah.</p>
                 </div>
                 <button type="button" @click="submitReal()" :disabled="busy" class="w-full rounded-lg bg-[#1565D8] px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" x-text="busy ? 'Menyimpan...' : 'Ajukan sebagai Pending (AO)'"></button>
-                <p class="text-xs text-zinc-500 dark:text-zinc-400">Hanya pengguna dengan peran AO dapat mengajukan. Engine memvalidasi ulang opsi sebelum penyimpanan; tidak membuat jadwal resmi.</p>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">Hanya pengguna dengan peran AO dapat mengajukan. Backend memvalidasi ulang opsi sebelum penyimpanan; tidak membuat jadwal resmi.</p>
             </section>
         </section>
 

@@ -37,18 +37,18 @@ class AgentProposalWorkflowService
 
         $cached = Cache::get(self::cacheKey($previewToken));
         if (! is_array($cached) || (int) ($cached['actor_id'] ?? 0) !== (int) $actor->id
-            || ! is_array($cached['draft'] ?? null) || ! is_array($cached['options'] ?? null)) {
+            || ! is_array($cached['options'] ?? null)) {
             throw ValidationException::withMessages([
                 'preview_token' => 'Rekomendasi agent tidak tersedia, kedaluwarsa, atau bukan milik pengguna ini.',
             ]);
         }
 
-        $draft = $this->normalizer->normalize($cached['draft']);
         $options = collect($cached['options'])->filter(fn (mixed $option): bool => is_array($option))->values();
         $selected = $options->firstWhere('option_label', $optionLabel);
-        if (! $selected) {
+        if (! $selected || ! is_array($selected['proposal_draft'] ?? null)) {
             throw ValidationException::withMessages(['option_label' => 'Opsi agent tidak ditemukan pada rekomendasi tersimpan.']);
         }
+        $draft = $this->normalizer->normalize($selected['proposal_draft']);
 
         return DB::transaction(function () use ($actor, $draft, $options, $selected): ScheduleProposal {
             $lockedActor = User::query()->whereKey($actor->id)->lockForUpdate()->firstOrFail();
